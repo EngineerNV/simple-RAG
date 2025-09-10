@@ -4,3 +4,33 @@
 
 # LangGraph
 .langgraph_api/
+
+# Python ignores
+__pycache__/
+*.py[cod]
+*.so
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.mypy_cache/
+.pytest_cache/
+.tox/
+.coverage
+coverage.xml
+*.cover
+.hypothesis/
+.pylint.d/
+*.log
+*.pot
+*.mo
+*.sqlite3
+*.db
+*.egg-info/
+dist/
+build/
+*.egg
+pip-wheel-metadata/

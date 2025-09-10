@@ -1,0 +1,22 @@
+
+# Orchestration & env
+langchain
+langchain-core
+langchain-community
+chromadb
+python-dotenv
+pydantic
+rich
+
+# Document loaders / parsing
+pypdf
+unstructured
+unstructured[local-inference]  # optional: better PDF/HTML parsing; can omit if too heavy
+
+# Embeddings / transformers
+transformers
+sentence-transformers
+
+# Cloud LLMs (choose one or both)
+openai
+anthropic

@@ -1,0 +1,18 @@
+# prompts.yaml
+# This file is for storing prompt templates for your RAG pipeline.
+# Use this to experiment with prompt engineering and see how different prompts affect your results.
+# Look up YAML syntax if you are unsure how to structure the file.
+
+# Example prompt sections:
+# - system: Instructions for the LLM
+# - user: The user's query or input
+#
+# Try writing your own prompts and see how the model responds!
+
+system: |
+  You are a helpful assistant. Use the retrieved context to answer the user's question.
+  If you don't know the answer, say so honestly.
+
+user: |
+  {question}
+  # Try changing the prompt or adding variables!

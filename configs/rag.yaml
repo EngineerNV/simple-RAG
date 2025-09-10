@@ -1,0 +1,21 @@
+# rag.yaml
+# This file is a template for configuring your Retrieval-Augmented Generation (RAG) pipeline.
+# Fill in the values as you experiment with different settings.
+# Look up YAML syntax if you are unsure how to structure the file.
+
+# Example sections you might want to include:
+# - model: Which LLM or embedding model to use
+# - chunk_size: How large each text chunk should be
+# - retrieval: Settings for how documents are retrieved
+# - embedding: Settings for embedding generation
+#
+# Try to add your own parameters and see how they affect the pipeline!
+
+model: "<your-model-here>"  # e.g., 'gpt-3.5-turbo', 'llama2', etc.
+chunk_size: 500             # Try changing this and see what happens
+retrieval:
+  top_k: 3                  # How many docs to retrieve
+  # Add more retrieval settings here
+embedding:
+  provider: "<your-embedding-provider>"  # e.g., 'openai', 'sentence-transformers'
+  # Add more embedding settings here
