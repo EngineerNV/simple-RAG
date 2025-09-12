@@ -1,8 +1,8 @@
-
 # Orchestration & env
 langchain
 langchain-core
 langchain-community
+langchain-text-splitters
 chromadb
 python-dotenv
 pydantic

@@ -17,27 +17,39 @@ LEARNING GUIDE (do not delete):
 """
 
 # Your code starts below
+"""Build index step (scaffold)
 
-def load_chunks(path):
-    """Load chunked data from the given path."""
-    # TODO: Implement loading logic
-    pass
+Plan:
+ 1. Import ingest.ingest() to get Document objects in-memory.
+ 2. Choose embedding approach:
+            a) Use LangChain HuggingFaceEmbeddings (model same as later query) OR
+            b) Manually use SentenceTransformer and pass embeddings to Chroma client.
+ 3. Create / load persistent Chroma vector store at data/chroma.
+ 4. Add documents with their metadata (headers already in doc.metadata).
+ 5. Persist store and print basic stats (count of vectors).
+ 6. (Optional later) add idempotency: skip if already embedded unless --force.
 
-def embed_chunks(chunks, embedding_model):
-    """Embed the text chunks using the specified embedding model."""
-    # TODO: Implement embedding logic
-    pass
+Next actions (to be implemented):
+    - from scripts.00_ingest import ingest
+    - from langchain_community.vectorstores import Chroma
+    - from langchain_community.embeddings import HuggingFaceEmbeddings
+    - call docs = ingest(save=False)
+    - embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    - vs = Chroma.from_documents(docs, embedding=embeddings, persist_directory="data/chroma")
+    - vs.persist()
+    - print(len(vs.get()['ids']))
 
-def store_embeddings(embeddings, db_path):
-    """Store the embeddings in a vector database at db_path."""
-    # TODO: Implement storage logic
-    pass
+NOTE: Implementation deferred until confirmation to proceed.
+"""
+
+from pathlib import Path
+
+CHROMA_DIR = Path("data") / "chroma"
+
+def main():
+        print("Index build scaffold ready. Implement logic once confirmed.")
 
 if __name__ == "__main__":
-    # Example usage (replace with your own logic)
-    # chunks = load_chunks("path/to/chunks")
-    # embeddings = embed_chunks(chunks, embedding_model="your-model")
-    # store_embeddings(embeddings, db_path="./data/chroma")
-    pass
+        main()
 
 # Try running this script and see what happens!

@@ -1,74 +1,76 @@
+"""00_ingest.py
+
+Ultra‑simple ingestion:
+    * Split markdown into sections by headers (#, ##, ###) using MarkdownHeaderTextSplitter.
+    * Keep ALL sections (including empty or 'Meta').
+    * Return list[Document]; no extra metadata manipulation, no persistence by default.
+    * Designed for piping directly into LangChain vector store creation.
+
+Minimal surface – easy to extend later (e.g., filtering, token metrics) without clutter now.
 """
-00_ingest.py
-
-This script is the first step in the RAG pipeline. It is responsible for loading documents from the data/corpus/ directory, converting them to text (if needed), and chunking them for later embedding.
-
----
-LEARNING GUIDE (do not delete):
-- Your goal: Load all files from data/corpus/ and split them into text chunks.
-- Try to:
-    * List all files in the corpus directory (hint: use os.listdir or pathlib).
-    * Read the contents of each file (try open(), .read(), etc.).
-    * Write a function to split text into chunks (look up 'text chunking python').
-    * Save the chunks to disk (as .txt, .json, or .pkl files in a new folder if you want).
-- Don't worry about embeddings or Chroma yet!
-- Add comments to explain your code and what you learned.
-"""
-
 
 import os
+from typing import List
 
-# Use environment variable for corpus directory, fallback to default if not set
-CORPUS_DIR = os.environ.get('CORPUS_DIR', os.path.join('data', 'corpus'))
+from langchain_text_splitters import MarkdownHeaderTextSplitter
 
-def list_corpus_files(corpus_dir):
-    """List all files in the given corpus directory. Returns a list of file paths."""
-    # TODO: Implement this function
-    pass
-    # TODO: Implement this function
-    pass
-    # TODO: Implement this function
-    pass
+# ---------------------------- Config ----------------------------
+CORPUS_DIR = os.environ.get("CORPUS_DIR", os.path.join("data", "corpus"))
+HEADER_LEVELS = ["#", "##", "###"]  # order matters
 
-def read_file(filepath):
-    """Read the contents of a file and return as a string."""
-    # TODO: Implement this function
-    pass
-    # TODO: Implement this function
-    pass
-    # TODO: Implement this function
-    pass
 
-def chunk_text(text, chunk_size=500):
-    """Split text into chunks of approximately chunk_size characters. Returns a list of text chunks."""
-    # TODO: Implement this function
-    pass
-    # TODO: Implement this function
-    pass
-    # TODO: Implement this function
-    pass
+# ---------------------------- Helpers ----------------------------
+def list_corpus_files(corpus_dir: str) -> List[str]:
+    return [os.path.join(corpus_dir, f) for f in os.listdir(corpus_dir)
+            if os.path.isfile(os.path.join(corpus_dir, f)) and not f.startswith('.')]
 
-def save_chunks(chunks, out_dir, base_filename):
-    """Save the list of chunks to disk (e.g., as .txt or .json)."""
-    # TODO: Implement this function (optional)
-    pass
-    # TODO: Implement this function (optional)
-    pass
-    # TODO: Implement this function (optional)
-    pass
 
-def main():
-    # 1. List all files in the corpus directory
+def read_text(path: str) -> str:
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+## Token counting intentionally omitted (keep simple per plan)
+
+
+## Removed pagination logic for simplicity (each section == one chunk)
+
+
+def split_markdown(markdown_text: str):
+    splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[(h, h) for h in HEADER_LEVELS])
+    return splitter.split_text(markdown_text)
+
+
+# (Persistence helpers removed – not needed now.)
+
+
+# ---------------------------- Core processing ----------------------------
+def process_file(path: str):
+    return split_markdown(read_text(path))
+
+
+def ingest() -> List:
     files = list_corpus_files(CORPUS_DIR)
-    # 2. Read each file and print the first 100 characters
-    for file in files:
-        text = read_file(file)
-        print(f"First 100 chars of {file}: {text[:100]}")
-        # 3. Chunk the text
-        chunks = chunk_text(text)
-        # 4. Save your chunks somewhere (optional)
-        # save_chunks(chunks, 'data/chunks', os.path.basename(file))
+    if not files:
+        print(f"No files in {CORPUS_DIR}")
+        return []
+    docs_all = []
+    for p in files:
+        docs = process_file(p)
+        print(f"{os.path.basename(p)} -> {len(docs)} sections")
+        docs_all.extend(docs)
+    print(f"Total sections: {len(docs_all)}")
+    return docs_all
 
-if __name__ == "__main__":
-    main()
+
+def preview(docs, n: int = 3):
+    for i, d in enumerate(docs[:n]):
+        headers = [d.metadata.get(h) for h in HEADER_LEVELS if d.metadata.get(h)]
+        print(f"[{i}] {' > '.join(headers) if headers else '<no header>'}")
+        snippet = d.page_content.strip().replace('\n', ' ')
+        print(snippet[:200] + ('...' if len(snippet) > 200 else ''))
+
+
+if __name__ == '__main__':
+    preview(ingest())
 

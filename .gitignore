@@ -34,3 +34,9 @@ dist/
 build/
 *.egg
 pip-wheel-metadata/
+
+# Project data artifacts
+# Ignore generated chunk files and ingested corpus content (keep documentation files)
+data/chunks/
+data/corpus/*
+!data/corpus/README.md
