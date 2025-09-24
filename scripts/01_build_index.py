@@ -1,55 +1,76 @@
+"""01_build_index.py — embed the corpus and persist it to Chroma.
 
-"""
-01_build_index.py
+Teacher briefing
+-----------------
+By the end of this milestone you should have a reproducible script that transforms
+the ingested ``Document`` objects into a Chroma collection. Every later step in
+the lab assumes this store exists, so focus on correctness and repeatability.
 
-This script is the second step in the RAG pipeline. It is responsible for embedding the text chunks and storing them in a Chroma vector database.
+Implementation checklist
+------------------------
+1. Import ``ingest`` from ``scripts`` (the helper is re-exported from ``00_ingest``).
+2. Choose an embedding model from LangChain (``HuggingFaceEmbeddings`` works offline;
+   ``OpenAIEmbeddings`` is an option if you have an API key).
+3. Create or connect to a Chroma collection persisted under ``data/chroma/`` using
+   the same embedding function you will use during retrieval.
+4. Add the documents and confirm their metadata is preserved.
+5. Print a concise run report (documents embedded, collection name, persistence dir,
+   and whether the call rebuilt an existing store).
 
----
-LEARNING GUIDE (do not delete):
-- Your goal: Take the text chunks from the previous step and embed them using a model, then store them in Chroma.
-- Try to:
-    * Load your text chunks from disk (from 00_ingest.py output).
-    * Look up a simple embedding model (hint: sentence-transformers, OpenAI, etc.).
-    * Install and import Chroma (chromadb).
-    * Store the embeddings in a persistent Chroma DB (use data/chroma/ as the persist directory).
-- You may need to install extra packages (see requirements.txt).
-- Add comments to explain your code and what you learned.
-"""
-
-# Your code starts below
-"""Build index step (scaffold)
-
-Plan:
- 1. Import ingest.ingest() to get Document objects in-memory.
- 2. Choose embedding approach:
-            a) Use LangChain HuggingFaceEmbeddings (model same as later query) OR
-            b) Manually use SentenceTransformer and pass embeddings to Chroma client.
- 3. Create / load persistent Chroma vector store at data/chroma.
- 4. Add documents with their metadata (headers already in doc.metadata).
- 5. Persist store and print basic stats (count of vectors).
- 6. (Optional later) add idempotency: skip if already embedded unless --force.
-
-Next actions (to be implemented):
-    - from scripts.00_ingest import ingest
-    - from langchain_community.vectorstores import Chroma
-    - from langchain_community.embeddings import HuggingFaceEmbeddings
-    - call docs = ingest(save=False)
-    - embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    - vs = Chroma.from_documents(docs, embedding=embeddings, persist_directory="data/chroma")
-    - vs.persist()
-    - print(len(vs.get()['ids']))
-
-NOTE: Implementation deferred until confirmation to proceed.
+Stretch goals
+-------------
+- Accept CLI flags for ``--collection-name``, ``--force`` rebuilds, and embedding choice.
+- Log simple timing stats to highlight slow stages.
+- Optionally serialize the chunk list to JSON for debugging or unit tests.
 """
 
-from pathlib import Path
+from pathlib import Path  # Resolve the directory where the Chroma DB should live
+from typing import Iterable  # Provide typing for the document list flowing through the script
+
+from langchain_community.embeddings import (  # Generate vector representations of text chunks
+    HuggingFaceEmbeddings,
+)
+from langchain_community.vectorstores import (  # Persist embeddings in a local Chroma collection
+    Chroma,
+)
+from langchain_core.documents import Document  # Describe the structure of LangChain documents
+from langchain_core.embeddings import Embeddings  # Type hint for embedding models to keep signatures clear
+
+from scripts import ingest  # Reuse the ingestion baseline supplied in 00_ingest
 
 CHROMA_DIR = Path("data") / "chroma"
 
-def main():
-        print("Index build scaffold ready. Implement logic once confirmed.")
+
+def build_embeddings_model() -> Embeddings:
+    """Return a configured embedding model to keep indexing and retrieval aligned."""
+    # TODO: Instantiate HuggingFaceEmbeddings() or another Embeddings implementation.
+    raise NotImplementedError
+
+
+def load_documents() -> Iterable[Document]:
+    """Run the ingestion baseline and surface the resulting documents."""
+    # TODO: Call ingest() and add any extra filtering or metadata adjustments.
+    raise NotImplementedError
+
+
+def persist_chroma(docs: Iterable[Document], embeddings: Embeddings) -> Chroma:
+    """Create or update a Chroma collection that stores the supplied documents."""
+    # TODO: Use Chroma.from_documents(...) or Chroma(persist_directory=...) to write vectors.
+    raise NotImplementedError
+
+
+def summarize_run(store: Chroma) -> None:
+    """Print key facts that help graders confirm the index was built correctly."""
+    # TODO: Inspect store._collection or store.get() to report counts and persistence paths.
+    raise NotImplementedError
+
+
+def main() -> None:
+    """CLI entry point expected by the assignment."""
+    # TODO: Parse CLI args, orchestrate embedding + persistence, and call summarize_run.
+    raise NotImplementedError
+
 
 if __name__ == "__main__":
-        main()
+    main()
 
-# Try running this script and see what happens!

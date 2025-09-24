@@ -1,82 +1,73 @@
+# simple-RAG — Retrieval-Augmented Generation Lab
 
-# simple-RAG — Learning RAG Project
+This workspace supplies a focused homework-style assignment on building a LangChain-powered RAG agent. You receive a working ingestion baseline and progressively design the remaining stages: embedding to Chroma, retrieval + agent routing, LLM prompting, and lightweight evaluation. Each script keeps the same numbering convention (`00`–`04`) so you can run them directly while you implement.
 
-This repository is a minimal, learning-focused Retrieval-Augmented Generation (RAG) project skeleton. It's designed for experimentation: drop documents into `data/corpus/`, run the scripts in order, and learn how ingestion, embedding, retrieval, and evaluation fit together.
+## Learning objectives
+- Translate raw markdown documents into LangChain `Document` objects that downstream tooling can consume.
+- Persist embeddings to a local Chroma collection and reuse the same model for retrieval.
+- Orchestrate a LangChain agent that calls into the Chroma retriever and a chat model to answer questions.
+- Capture quick evaluation signals (faithfulness and abstention) to understand when the pipeline is trustworthy.
 
-High-level pipeline (scripts run in order):
+## Assignment setup
+1. Create and activate a Python virtual environment.
+2. Install the dependencies with `pip install -r requirements.txt`.
+3. Copy `.env.example` to `.env` and populate provider keys. The LLM hook expects `RAG_LLM_API_KEY` but you may rename it.
+4. Place one or more markdown files in `data/corpus/`.
+5. Run `python scripts/00_ingest.py` once to verify the corpus is discovered and chunked.
 
-- `scripts/00_ingest.py` — load source documents and chunk text.
-- `scripts/01_build_index.py` — embed chunks and persist vectors into Chroma (or other vector DB).
-- `scripts/02_query.py` — embed a user question, retrieve relevant chunks, and (optionally) call a cloud LLM to generate an answer.
-- `scripts/03_eval.py` — simple evaluation helpers to measure faithfulness and when to abstain.
+## Baseline provided
+- **`scripts/00_ingest.py`** – functional ingestion utility that splits markdown documents into header-aware LangChain `Document` objects.
+- **`scripts/01_build_index.py`** – checklist for embedding and persisting chunks with Chroma.
+- **`scripts/02_query.py`** – checklist for composing a LangChain agent that talks to the vector store and an LLM.
+- **`scripts/03_eval.py`** – checklist for evaluating groundedness and abstention heuristics.
+- **`scripts/04_llm_api.py`** – helper for formatting prompts and executing raw LLM calls.
+- **`configs/`** – placeholder YAML settings you can extend.
+- **`requirements.txt`** – dependency list aligned with the LangChain + Chroma plan.
+- **`data/`** – staging area for source corpus and persisted vector stores.
 
-Repository layout
------------------
+## Milestones
 
-- `configs/` — YAML configs and prompts. Example: `rag.yaml`, `prompts.yaml`.
-- `data/`
-  - `corpus/` — drop your documents here (PDFs, text, markdown).
-  - `chroma/` — persistent storage used by the vector DB (created by the index step).
-- `scripts/` — lightweight, educational scripts for each pipeline step (see above).
-- `.env.example` — environment variables used by the project (e.g., `CORPUS_DIR`, API keys).
-- `requirements.txt` — recommended Python packages to install for the pipeline.
+### Milestone 0 – Inspect the ingestion baseline (`scripts/00_ingest.py`)
+- Execute `python scripts/00_ingest.py` and note how documents are chunked and which metadata fields are preserved.
+- Decide whether additional cleaning is required (stopword removal, metadata enrichment, etc.). Keep the public `ingest()` contract stable so other steps import it.
 
-How the pipeline works (brief)
------------------------------
+### Milestone 1 – Build the vector index (`scripts/01_build_index.py`)
+Teacher expectations:
+- Import `ingest` from `scripts` (re-exported from `00_ingest`) to obtain the `Document` list.
+- Instantiate an embedding model from LangChain (for example `HuggingFaceEmbeddings` or `OpenAIEmbeddings`) and use it consistently across retrieval.
+- Create or connect to a persisted Chroma collection in `data/chroma/` using `langchain_community.vectorstores.Chroma`.
+- Add the documents, confirm they are written to disk, and print a short summary (chunk count, collection name, persistence directory).
+- Provide an optional CLI flag (e.g., `--force`) to rebuild the store from scratch.
 
-1. Ingest (00_ingest.py)
-	- Read files from `data/corpus/` (or a directory set by the `CORPUS_DIR` env var).
-	- Convert non-text formats (PDF, DOCX) to text if needed.
-	- Split long documents into smaller chunks. Chunking reduces the token size and improves retrieval relevance.
+### Milestone 2 – Wire a retrieval-aware agent (`scripts/02_query.py`)
+Teacher expectations:
+- Load the same embedding model and wrap the Chroma collection as a retriever.
+- Define a LangChain `Tool` that exposes the retriever and register it with an agent (ReAct, ConversationalRetrievalChain, or RetrievalQA chain wrapped as a tool).
+- Collect a user question via CLI or function arguments, invoke the agent, and display both the retrieved context snippets and the final answer/abstain message.
+- Allow configuration of retrieval depth (`k`) and model choice via CLI arguments or environment variables.
 
-2. Build index (01_build_index.py)
-	- Take chunks and produce embeddings via an embeddings model (local or cloud).
-	- Store embeddings and metadata in a vector DB (Chroma by default) with `data/chroma/` as the persistence directory.
+### Milestone 3 – Shape the LLM call (`scripts/04_llm_api.py`)
+Teacher expectations:
+- Load API credentials from the environment, instantiate your chosen chat/completions client, and keep client creation in a helper.
+- Build a prompt template that threads system guidance, the question, and retrieved context chunks.
+- Execute the LLM call, capture metadata (model, latency, token usage), and expose a CLI hook for manual smoke tests.
 
-3. Query (02_query.py)
-	- Embed user queries and perform a nearest-neighbors search over the vector DB.
-	- Collect top-k chunks as context and optionally call a cloud LLM to produce a final answer.
-	- This is the RAG step: the model is augmented with retrieved context to ground its outputs.
+### Milestone 4 – Evaluate groundedness (`scripts/03_eval.py`)
+Teacher expectations:
+- Curate a small evaluation file (JSON or CSV) with question/answer/context entries produced by your agent.
+- Implement `is_faithful` and `should_abstain` heuristics (keyword overlap, citation presence, or LLM-based checks) and summarise pass/fail counts.
+- Optionally persist detailed reports for later iteration.
 
-4. Eval (03_eval.py)
-	- Simple heuristics to check if an answer is supported by the retrieved context (faithfulness) and whether the system should abstain.
-	- Designed as learning scaffolding — implement and experiment with different checks.
+## Deliverables
+- Implemented scripts for milestones 1–4 that are runnable via `python scripts/<step>.py`.
+- A transcript demonstrating the agent retrieving context and answering (or abstaining) for at least one query.
+- A smoke test of the standalone LLM helper that proves the API integration works (or gracefully abstains without a key).
+- An evaluation summary that highlights faithful vs. unfaithful answers and abstention decisions.
+- Reflection notes on next steps you would explore (model swaps, richer tools, UI ideas, etc.).
 
-Learning goals and exercises
-----------------------------
+## Working notes
+- Re-run ingestion whenever the corpus changes; rebuild embeddings if you swap models.
+- Keep secrets in `.env` and never commit the file.
+- Remove `data/chroma/` to force a clean index rebuild during experiments.
+- Use `configs/` to capture tunable parameters once you move beyond the defaults.
 
-- Explore chunking strategies (fixed-size, overlap, sentence-aware).
-- Try different embedding models and compare retrieval quality.
-- Inspect the `data/chroma/` folder after indexing to learn what persistence looks like.
-- Implement simple faithfulness checks in `03_eval.py` (keyword overlap, answer verification via LLM, etc.).
-- Replace or extend the vector DB (e.g., FAISS, Milvus) for practice.
-
-Quick start
------------
-
-1. Create a virtual environment and install dependencies: see `requirements.txt`.
-2. Drop documents into `data/corpus/`.
-3. (Optional) Set `CORPUS_DIR` in your environment to point somewhere else.
-4. Run the scripts in order:
-
-	- `python scripts/00_ingest.py`
-	- `python scripts/01_build_index.py`
-	- `python scripts/02_query.py`
-	- `python scripts/03_eval.py`
-
-Notes
------
-
-- The scripts are intentionally skeletons with learning prompts and TODOs. They don't aim to be production-ready; they're teaching tools.
-- When adding secrets or API keys, use `.env` and never commit secrets to the repo.
-- Feel free to extend the scripts, add unit tests, or wire up CI for automated checks.
-
-Contributing
-------------
-
-If you improve a lesson or add helpful tests/examples, open a PR. Keep edits focused and include short notes about what learners will gain.
-
-License
--------
-
-See `LICENSE`.
