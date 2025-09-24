@@ -1,18 +1,31 @@
-"""00_ingest.py
+"""00_ingest.py — baseline ingestion utility for the RAG homework.
 
-Ultra‑simple ingestion:
-    * Split markdown into sections by headers (#, ##, ###) using MarkdownHeaderTextSplitter.
-    * Keep ALL sections (including empty or 'Meta').
-    * Return list[Document]; no extra metadata manipulation, no persistence by default.
-    * Designed for piping directly into LangChain vector store creation.
+Teacher briefing
+-----------------
+This is the only fully implemented step. It ensures every learner begins with the
+same chunking strategy before experimenting with embeddings, retrieval, and agents.
 
-Minimal surface – easy to extend later (e.g., filtering, token metrics) without clutter now.
+What the script already provides
+--------------------------------
+* Reads markdown-like files from ``data/corpus/`` (configurable via ``CORPUS_DIR``).
+* Splits documents into sections keyed by headers (#, ##, ###) using
+  ``MarkdownHeaderTextSplitter``.
+* Returns ``List[Document]`` objects with header metadata intact—ready for embedding.
+
+Learner guidance
+----------------
+- Extend the script only if you need additional preprocessing. Preserve the public
+  ``ingest()`` contract so later milestones can import it directly.
+- Use ``preview()`` to inspect the chunk hierarchy and confirm metadata is set up for
+  retrieval explanations.
 """
 
-import os
-from typing import List
+import os  # Handle filesystem navigation for the corpus directory
+from typing import List  # Describe the list of LangChain Document objects returned
 
-from langchain_text_splitters import MarkdownHeaderTextSplitter
+from langchain_text_splitters import (  # Split markdown files into header-aware chunks
+    MarkdownHeaderTextSplitter,
+)
 
 # ---------------------------- Config ----------------------------
 CORPUS_DIR = os.environ.get("CORPUS_DIR", os.path.join("data", "corpus"))
@@ -28,12 +41,6 @@ def list_corpus_files(corpus_dir: str) -> List[str]:
 def read_text(path: str) -> str:
     with open(path, 'r', encoding='utf-8') as f:
         return f.read()
-
-
-## Token counting intentionally omitted (keep simple per plan)
-
-
-## Removed pagination logic for simplicity (each section == one chunk)
 
 
 def split_markdown(markdown_text: str):
@@ -73,4 +80,5 @@ def preview(docs, n: int = 3):
 
 if __name__ == '__main__':
     preview(ingest())
+
 
