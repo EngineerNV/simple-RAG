@@ -39,6 +39,7 @@ from langchain_community.vectorstores import (  # Persist embeddings in a local 
 )
 from langchain_core.documents import Document  # Describe the structure of LangChain documents
 from langchain_core.embeddings import Embeddings  # Type hint for embedding models to keep signatures clear
+import json
 
 try:  # Reuse the ingestion baseline supplied in 00_ingest
     from scripts import ingest as run_ingest
@@ -66,12 +67,21 @@ def build_embeddings_model(model_name: str = DEFAULT_MODEL_NAME) -> Embeddings:
     return HuggingFaceEmbeddings(model_name=model_name)
 
 
-def persist_chroma(docs: Iterable[Document], embeddings: Embeddings) -> Chroma:
-    """Create or update a Chroma collection that stores the supplied documents."""
+def persist_chroma(processed_docs: Iterable[Document], embedding_model: Embeddings) -> Chroma:
+    """Create or update a Chroma collection that stores the supplied processed document chunks.
 
-    documents: List[Document] = list(docs)
-    if not documents:
-        raise ValueError("No documents supplied to persist_chroma; run ingestion first.")
+    Parameters
+    ----------
+    processed_docs:
+        An iterable of LangChain `Document` objects produced by the ingestion step. These
+        represent pre-split chunks (sections) ready for embedding and storage.
+    embedding_model:
+        An embedding model instance (LangChain `Embeddings`) used to convert text to vectors.
+    """
+
+    processed_documents: List[Document] = list(processed_docs)
+    if not processed_documents:
+        raise ValueError("No processed documents supplied to persist_chroma; run ingestion first.")
 
     CHROMA_DIR.parent.mkdir(parents=True, exist_ok=True)
     already_exists = CHROMA_DIR.exists() and any(CHROMA_DIR.iterdir())
@@ -79,9 +89,51 @@ def persist_chroma(docs: Iterable[Document], embeddings: Embeddings) -> Chroma:
         shutil.rmtree(CHROMA_DIR)
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
-    store = Chroma.from_documents(
-        documents=documents,
-        embedding=embeddings,
+    # Sanitize metadata to ensure all values are JSON-serializable (Chroma requires simple types).
+    def _sanitize_metadata(md: dict) -> dict:
+        if not isinstance(md, dict):
+            return {}
+        out = {}
+        for k, v in md.items():
+            key = str(k)
+            # Allow simple JSON-friendly primitives unchanged
+            if v is None or isinstance(v, (str, bool, int, float)):
+                out[key] = v
+                continue
+            # Lists/dicts: attempt to JSON-serialize; fall back to string repr
+            if isinstance(v, (list, dict)):
+                try:
+                    json.dumps(v)
+                    out[key] = v
+                    continue
+                except Exception:
+                    out[key] = str(v)
+                    continue
+            # For any other type (set, bytes, objects), convert to string
+            out[key] = str(v)
+        return out
+
+    # Attach sanitized metadata back to documents (Chroma expects simple metadata values)
+    for doc in processed_documents:
+        md = getattr(doc, "metadata", None) or {}
+        sanitized = _sanitize_metadata(md)
+        try:
+            # Some Document implementations are frozen; assign to .metadata if possible
+            doc.metadata = sanitized
+        except Exception:
+            # Fallback: nothing to do; Chroma.from_documents will use the sanitized mapping below
+            pass
+
+    sanitized_metadatas = [_sanitize_metadata(getattr(d, "metadata", {}) or {}) for d in processed_documents]
+
+    # Persist processed document chunks and use the provided embedding model instance.
+    # Use from_texts to explicitly pass sanitized texts and metadatas and avoid internal
+    # duplication of the `metadatas` keyword.
+    texts = [getattr(d, "page_content", str(d)) for d in processed_documents]
+    store = Chroma.from_texts(
+        texts=texts,
+        embedding=embedding_model,
+        metadatas=sanitized_metadatas,
         persist_directory=str(CHROMA_DIR),
     )
     store.persist()
@@ -89,7 +141,7 @@ def persist_chroma(docs: Iterable[Document], embeddings: Embeddings) -> Chroma:
     collection = store._collection  # type: ignore[attr-defined]
     _RUN_METADATA.update(
         {
-            "doc_count": len(documents),
+            "doc_count": len(processed_documents),
             "collection_name": getattr(collection, "name", "default"),
             "persist_directory": str(CHROMA_DIR),
             "rebuilt": already_exists,
@@ -140,8 +192,10 @@ def main() -> None:
         print("No documents were ingested; skipping index build.")
         return
 
-    embeddings = build_embeddings_model()
-    store = persist_chroma(documents, embeddings)
+    # Clarify naming: these are processed Documents (chunks) and an embedding model instance.
+    processed_documents = documents
+    embedding_model = build_embeddings_model()
+    store = persist_chroma(processed_documents, embedding_model)
     summarize_run(store)
 
 
