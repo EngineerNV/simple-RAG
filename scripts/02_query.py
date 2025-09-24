@@ -1,4 +1,4 @@
-"""02_query.py — connect the retriever and a simple retrieval-based answerer.
+"""02_query.py  connect the retriever and a simple retrieval-based answerer.
 
 Teacher briefing
 -----------------
@@ -26,14 +26,19 @@ Stretch goals
 - Persist conversation history for follow-up questions.
 """
 
-from pathlib import Path
-from typing import List
+from __future__ import annotations
+
 import argparse
+import os
+import sys
 import textwrap
+from pathlib import Path
+from typing import List, Sequence, Tuple
 
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
 
 """
 This script provides a minimal, runnable retrieval smoke-test so you can see the
@@ -46,85 +51,239 @@ offline environments and is easy to extend to call a real chat model later.
 """
 
 DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_LLM_MODEL = "gpt-5-mini"
 CHROMA_DIR = Path("data") / "chroma"
+SYSTEM_PROMPT = (
+    "Answer ONLY using the provided contexts. If unknown, say you don't know. "
+    "Cite as [source N]."
+)
 
-
+RetrieverResult = List[Tuple[Document, float]]
 
 
 def load_vector_store(persist_dir: Path, embedding_model: HuggingFaceEmbeddings) -> Chroma:
-    """Connect to the Chroma collection built during the indexing milestone.
+    """Connect to the Chroma collection built during the indexing milestone."""
 
-    Returns a LangChain `Chroma` wrapper instance configured to use the provided
-    embedding model so retrieval behavior matches indexing.
-    """
     if not persist_dir.exists():
         raise FileNotFoundError(f"Chroma persist directory not found: {persist_dir}")
     store = Chroma(persist_directory=str(persist_dir), embedding_function=embedding_model)
     return store
 
 
-def build_retriever(store: Chroma, k: int):
-    """Return a retriever object that provides `get_relevant_documents`.
-
-    We keep this simple and return the object from `store.as_retriever` which
-    LangChain wrappers expose. The returned object supports `.get_relevant_documents(query)`
-    which will be used below.
-    """
-    return store.as_retriever(search_kwargs={"k": k})
+def clean_snippet(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    return " ".join(stripped.split())
 
 
-def make_retriever_tool(retriever):
-    """Return a simple callable that wraps the retriever for ad-hoc use.
-
-    We return a small function rather than a full LangChain `Tool` to avoid
-    heavy agent wiring and keep the smoke-test lightweight.
-    """
-
-    def _call(query: str):
-        return retriever.get_relevant_documents(query)
-
-    return _call
+def format_metadata(metadata: dict | None) -> str:
+    if not metadata:
+        return "metadata: none"
+    parts = [f"{key}={value}" for key, value in metadata.items()]
+    return "metadata: " + ", ".join(parts)
 
 
-def load_chat_model(model_name: str):
-    """Placeholder loader for a chat model. For the smoke-test we don't create
-    a real LLM — callers can substitute a real client if desired."""
-    return None
+def retrieve_contexts(store: Chroma, question: str, k: int) -> RetrieverResult:
+    results = store.similarity_search_with_relevance_scores(question, k=k)
+    formatted: RetrieverResult = []
+    for doc, score in results:
+        try:
+            numeric_score = float(score)
+        except (TypeError, ValueError):
+            numeric_score = 0.0
+        formatted.append((doc, numeric_score))
+    return formatted
 
 
-def build_agent(llm, tool):
-    """No-op for the smoke-test. We will call the retriever directly instead
-    of wiring a full LangChain agent. Keep this helper for future extension."""
-    return None
-
-
-def run_agent(agent, question: str, retriever_callable, k: int = 3) -> tuple[str, List[Document], List[dict]]:
-    """Run the simple retrieval flow and synthesize a basic answer.
-
-    Returns a tuple: (answer_text, retrieved_documents, metadata_list)
-    """
-    docs: List[Document] = retriever_callable(question)
-    # Simple synthesized answer: join top-k snippets (trimmed) — replace with LLM later.
-    snippets = [d.page_content.strip().replace("\n", " ") for d in docs]
-    answer = "\n\n".join(snippets[:k]) if snippets else "No relevant context found."
-    metadatas = [getattr(d, "metadata", {}) for d in docs]
-    return answer, docs, metadatas
-
-
-def display_result(answer: str, contexts: List[Document], metadatas: List[dict]) -> None:
-    """Print retrieved contexts and the synthesized answer in a readable form."""
-    print("\nRetrieved contexts:")
-    for i, d in enumerate(contexts):
-        hdr = " | ".join(f"{k}: {v}" for k, v in (getattr(d, 'metadata', {}) or {}).items())
-        snippet = d.page_content.strip().replace("\n", " ")
-        print(f"[{i}] {hdr}")
-        print(textwrap.fill(snippet, width=120))
+def emit_contexts(results: RetrieverResult, header: str) -> None:
+    print(f"\n{header}")
+    if not results:
+        print("No contexts retrieved.")
+        return
+    for idx, (doc, score) in enumerate(results):
+        meta_line = format_metadata(getattr(doc, "metadata", {}))
+        snippet = clean_snippet(doc.page_content)
+        print(f"[{idx}] score: {score:.3f} | {meta_line}")
+        if snippet:
+            print(textwrap.fill(snippet, width=120))
+        else:
+            print("(empty snippet)")
         print("-")
+
+
+def synthesize_from_results(results: RetrieverResult, limit: int) -> str:
+    snippets: List[str] = []
+    for doc, _ in results[:limit]:
+        snippet = clean_snippet(doc.page_content)
+        if snippet:
+            snippets.append(snippet)
+    return "\n\n".join(snippets) if snippets else "No relevant context found."
+
+
+def run_none_mode(results: RetrieverResult, k: int) -> None:
+    emit_contexts(results, "Retrieved contexts:")
     print("\nSynthesized answer:\n")
-    print(answer)
+    print(synthesize_from_results(results, k))
 
 
-def main() -> None:
+def run_pretend_mode(question: str, results: RetrieverResult, k: int) -> None:
+    print("\n=== Pretend Agent Prompt Preview ===\n")
+    print("System instruction:")
+    print(textwrap.fill(SYSTEM_PROMPT, width=120))
+    print("\nUser question:")
+    print(textwrap.fill(question, width=120))
+    print("\nRetrieved contexts (top k):")
+    if not results:
+        print("No contexts retrieved.")
+    for idx, (doc, score) in enumerate(results[:k]):
+        meta_line = format_metadata(getattr(doc, "metadata", {}))
+        snippet = clean_snippet(doc.page_content)
+        print(f"[source {idx}] score: {score:.3f} | {meta_line}")
+        if snippet:
+            print(textwrap.fill(snippet, width=120))
+        else:
+            print("(empty snippet)")
+        print("-")
+    cited = [str(idx) for idx in range(min(k, len(results)))]
+    synth = " ".join(
+        clean_snippet(doc.page_content) for doc, _ in results[:k]
+    )
+    templated_answer = (
+        "Answer (synthesized from sources ["
+        + ",".join(cited)
+        + "]):\n\n"
+        + (synth or "No relevant context found.")
+    )
+    print("\n=== Pretend Agent Final Answer ===\n")
+    print(templated_answer)
+
+
+def compose_user_prompt(question: str, results: RetrieverResult) -> str:
+    lines: List[str] = [f"Question: {question}", "", "Contexts:"]
+    if not results:
+        lines.append("No context retrieved.")
+    else:
+        for idx, (doc, score) in enumerate(results):
+            meta_line = format_metadata(getattr(doc, "metadata", {}))
+            snippet = clean_snippet(doc.page_content)
+            lines.append(f"[source {idx}] score: {score:.3f} | {meta_line}")
+            lines.append(snippet or "(empty snippet)")
+            lines.append("")
+    return "\n".join(lines).strip()
+
+
+def load_chat_model(
+    provider: str,
+    model_name: str,
+    api_key: str,
+    temperature: float,
+    max_tokens: int,
+    base_url: str | None,
+):
+    if provider != "openai":
+        raise RuntimeError(f"Unsupported provider '{provider}'.")
+    try:
+        from langchain_openai import ChatOpenAI
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "Missing optional dependency 'langchain-openai'. Install it with `pip install langchain-openai`."
+        ) from exc
+
+    init_kwargs = {
+        "model": model_name,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "openai_api_key": api_key,
+    }
+    if base_url:
+        init_kwargs["openai_api_base"] = base_url
+    return ChatOpenAI(**init_kwargs)
+
+
+def print_usage_metadata(response, show_usage: bool) -> None:
+    if not show_usage:
+        return
+    usage = None
+    if hasattr(response, "response_metadata"):
+        usage = response.response_metadata.get("token_usage") or response.response_metadata.get("usage")
+    if not usage and hasattr(response, "additional_kwargs"):
+        usage = response.additional_kwargs.get("usage")
+    if not usage:
+        return
+    print("\nUsage metadata:")
+    if isinstance(usage, dict):
+        for key, value in usage.items():
+            print(f"- {key}: {value}")
+    else:
+        print(usage)
+
+
+def print_mock_answer(results: RetrieverResult) -> None:
+    print("\n=== Final Answer ===\n")
+    indices = [str(idx) for idx in range(len(results))]
+    snippets: List[str] = []
+    for doc, _ in results:
+        snippet = clean_snippet(doc.page_content)
+        if snippet:
+            snippets.append(snippet)
+    combined = " ".join(snippets) if snippets else "No relevant context available."
+    print(f"(mock) Answer (synthesized from sources [{', '.join(indices)}]): {combined}")
+
+
+def run_llm_mode(
+    question: str,
+    results: RetrieverResult,
+    provider: str,
+    model_name: str,
+    api_key: str | None,
+    temperature: float,
+    max_tokens: int,
+    base_url: str | None,
+    show_usage: bool,
+) -> None:
+    emit_contexts(results, "=== Retrieved Evidence ===")
+    if not api_key:
+        print("OpenAI API key missing. Falling back to mock answer.", file=sys.stderr)
+        print_mock_answer(results)
+        return
+
+    try:
+        llm = load_chat_model(provider, model_name, api_key, temperature, max_tokens, base_url)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        print_mock_answer(results)
+        return
+
+    messages = [
+        SystemMessage(content=SYSTEM_PROMPT),
+        HumanMessage(content=compose_user_prompt(question, results)),
+    ]
+    try:
+        response = llm.invoke(messages)
+    except Exception as exc:  # pragma: no cover - network/remote failure
+        print(f"LLM call failed ({exc}). Falling back to mock answer.", file=sys.stderr)
+        print_mock_answer(results)
+        return
+
+    content = response.content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for chunk in content:
+            if isinstance(chunk, dict):
+                parts.append(chunk.get("text", ""))
+            else:
+                parts.append(str(chunk))
+        final_text = " ".join(part for part in parts if part).strip()
+    else:
+        final_text = str(content).strip()
+
+    print("\n=== Final Answer ===\n")
+    print(final_text or "I don't know.")
+    print_usage_metadata(response, show_usage)
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Retrieval smoke-test: query the Chroma store")
     parser.add_argument("--question", "-q", required=True, help="Question to query against the store")
     parser.add_argument("--k", type=int, default=3, help="Number of contexts to retrieve")
@@ -135,54 +294,48 @@ def main() -> None:
         default="none",
         help="Agent mode: 'none' (no LLM), 'pretend' (show prompt + templated answer), or 'llm' (call real model)",
     )
-    args = parser.parse_args()
+    parser.add_argument("--provider", default="openai", help="LLM provider identifier (default: openai)")
+    parser.add_argument("--llm-model", default=DEFAULT_LLM_MODEL, help="Chat model name to request (default: gpt-5-mini)")
+    parser.add_argument("--api-key", dest="api_key", help="API key for the chosen provider (defaults to environment)")
+    parser.add_argument("--base-url", dest="base_url", help="Optional base URL for OpenAI-compatible endpoints")
+    parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature for the chat model")
+    parser.add_argument("--max-tokens", type=int, default=700, help="Maximum tokens for the chat model response")
+    parser.add_argument(
+        "--show-usage",
+        action="store_true",
+        help="Print token usage metadata when returned by the provider",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
 
     embed = HuggingFaceEmbeddings(model_name=args.model)
     store = load_vector_store(CHROMA_DIR, embed)
-    retriever = build_retriever(store, k=args.k)
-    retriever_callable = make_retriever_tool(retriever)
+    results = retrieve_contexts(store, args.question, args.k)
 
-    # Agent-mode behavior
     if args.agent_mode == "none":
-        answer, docs, metadatas = run_agent(None, args.question, retriever_callable, k=args.k)
-        display_result(answer, docs, metadatas)
-    elif args.agent_mode == "pretend":
-        # Build the agent prompt preview that a real LLM would receive
-        docs_preview = []
-        for i, d in enumerate(retriever_callable(args.question)):
-            hdr = " | ".join(f"{k}: {v}" for k, v in (getattr(d, 'metadata', {}) or {}).items())
-            snippet = d.page_content.strip().replace("\n", " ")
-            docs_preview.append({"index": i, "metadata": getattr(d, 'metadata', {}), "snippet": snippet})
+        run_none_mode(results, args.k)
+        return
 
-        # Print the composed prompt and contexts for inspection
-        print("\n=== Pretend Agent Prompt Preview ===\n")
-        system_msg = (
-            "You are an assistant that must answer the user's question using ONLY the provided contexts. "
-            "If the information is insufficient, say you don't know. Quote sources in square brackets like [source #]."
-        )
-        print("System instruction:")
-        print(textwrap.fill(system_msg, width=120))
-        print("\nUser question:")
-        print(textwrap.fill(args.question, width=120))
-        print("\nRetrieved contexts (top k):")
-        for item in docs_preview[: args.k]:
-            print(f"[{item['index']}] metadata: {item['metadata']}")
-            print(textwrap.fill(item['snippet'], width=120))
-            print("-")
+    if args.agent_mode == "pretend":
+        run_pretend_mode(args.question, results, args.k)
+        return
 
-        # Very small templated synthesis showing which sources we'd cite
-        cited = [str(item["index"]) for item in docs_preview[: args.k]]
-        synth = " ".join(item["snippet"] for item in docs_preview[: args.k])
-        templated_answer = "Answer (synthesized from sources [" + ",".join(cited) + "]):\n\n" + (synth or "No relevant context found.")
-        print("\n=== Pretend Agent Final Answer ===\n")
-        print(templated_answer)
-    else:
-        # 'llm' mode not implemented in this lightweight smoke-test
-        print("LLM agent mode requested but not implemented in this script. Use --agent-mode pretend for a simulated run.")
+    api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
+    run_llm_mode(
+        question=args.question,
+        results=results,
+        provider=args.provider,
+        model_name=args.llm_model,
+        api_key=api_key,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        base_url=args.base_url,
+        show_usage=args.show_usage,
+    )
 
 
 if __name__ == "__main__":
     main()
-
-
-
