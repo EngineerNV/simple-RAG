@@ -1,0 +1,6 @@
+langchain
+chromadb
+python-dotenv
+pydantic
+rich
+pypdf

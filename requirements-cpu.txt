@@ -1,0 +1,9 @@
+# Minimal CPU-only development requirements for simple-RAG
+langchain
+chromadb
+python-dotenv
+pydantic
+rich
+pypdf
+sentence-transformers
+transformers
