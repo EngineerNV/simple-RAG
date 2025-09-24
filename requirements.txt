@@ -11,7 +11,7 @@ rich
 # Document loaders / parsing
 pypdf
 unstructured
-unstructured[local-inference]  # optional: better PDF/HTML parsing; can omit if too heavy
+# unstructured[local-inference]  # optional: better PDF/HTML parsing; can omit if too heavy
 
 # Embeddings / transformers
 transformers
