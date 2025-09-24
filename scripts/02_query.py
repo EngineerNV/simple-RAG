@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from dotenv import load_dotenv
 import sys
 import textwrap
 from pathlib import Path
@@ -59,7 +60,7 @@ SYSTEM_PROMPT = (
 )
 
 RetrieverResult = List[Tuple[Document, float]]
-
+load_dotenv()
 
 def load_vector_store(persist_dir: Path, embedding_model: HuggingFaceEmbeddings) -> Chroma:
     """Connect to the Chroma collection built during the indexing milestone."""
