@@ -1,55 +1,103 @@
+"""02_query.py — connect the retriever and chat model through a LangChain agent.
+
+Teacher briefing
+-----------------
+This milestone demonstrates how the vector index supports interactive QA. Build a
+small LangChain agent that exposes the Chroma retriever as a tool and lets a chat
+model decide how to answer. Showcase both the retrieved evidence and the model's
+final response so reviewers can trace the reasoning path.
+
+Implementation checklist
+------------------------
+1. Load the embedding model and persisted Chroma store created in milestone 1.
+2. Wrap the store in a retriever (`as_retriever` or `VectorStoreRetriever`).
+3. Register the retriever as a LangChain `Tool` so the agent can call it.
+4. Instantiate a chat model (``ChatOpenAI`` or ``ChatAnthropic``) and construct an
+   agent (`create_react_agent`, `AgentExecutor`, or a RetrievalQA chain wrapped as a tool).
+5. Collect a user question, run it through the agent, and print:
+   - the retrieved chunks (with metadata and scores) and
+   - the model's answer or an explicit abstain message when no evidence is found.
+6. Support configuration for ``k`` (retrieval depth) and model name via CLI flags.
+
+Stretch goals
+-------------
+- Cache or display token usage for transparency.
+- Allow batch querying from a file of questions.
+- Persist conversation history for follow-up questions.
 """
-02_query.py
 
-This script is the third step in the RAG pipeline. It is responsible for querying the Chroma vector database with a user question and retrieving relevant chunks, then sending them to a cloud LLM for answer generation.
+from pathlib import Path  # Locate the persisted Chroma directory on disk
+from typing import List  # Describe collections of documents and tool outputs
 
----
-LEARNING GUIDE (do not delete):
-- Your goal: Query your Chroma DB with a question and get relevant context back.
-- Try to:
-    * Connect to your Chroma DB (see chromadb docs).
-    * Accept a user question (input() or hardcoded for now).
-    * Embed the question using the same model as before.
-    * Retrieve the most similar chunks from Chroma.
-    * (Optional) Send the context and question to a cloud LLM (OpenAI, Azure, etc.) and print the answer.
-- Look up how to use chromadb for similarity search.
-- Add comments to explain your code and what you learned.
+from langchain.agents import (  # Build and execute a retrieval-augmented agent
+    AgentExecutor,
+    create_react_agent,
+)
+from langchain_core.language_models.chat_models import (  # Type hint for chat-based LLM clients
+    BaseChatModel,
+)
+from langchain_core.prompts import ChatPromptTemplate  # Compose prompts for the agent and tools
+from langchain_core.runnables import Runnable  # Represent retrievers/tools in a generic way
+from langchain_community.embeddings import (  # Recreate the embedding model used for indexing
+    HuggingFaceEmbeddings,
+)
+from langchain_community.vectorstores import (  # Load the persisted Chroma collection
+    Chroma,
+)
+from langchain_core.documents import Document  # Provide structure for retrieved context snippets
+from langchain.tools import Tool  # Register the retriever so the agent can invoke it
 
-"""
+from scripts import ingest  # Optional: reuse ingestion for ad-hoc checks or rebuilding
 
-def connect_chroma(db_path):
-    """Connect to the Chroma vector database at db_path."""
-    # TODO: Implement connection logic
-    pass
 
-def get_user_query():
-    """Get a query from the user (e.g., via input or function argument)."""
-    # TODO: Implement user query input
-    pass
+def load_vector_store(persist_dir: Path, embedding_model: HuggingFaceEmbeddings) -> Chroma:
+    """Connect to the Chroma collection built during the indexing milestone."""
+    # TODO: Use Chroma(persist_directory=..., embedding_function=...) to load vectors.
+    raise NotImplementedError
 
-def embed_query(query, embedding_model):
-    """Embed the user query using the specified embedding model."""
-    # TODO: Implement embedding logic
-    pass
 
-def retrieve_chunks(query_embedding, db):
-    """Retrieve relevant chunks from the vector database using the query embedding."""
-    # TODO: Implement retrieval logic
-    pass
+def build_retriever(store: Chroma, k: int) -> Runnable:
+    """Expose the vector store as a retriever runnable for the agent."""
+    # TODO: Call store.as_retriever(search_kwargs={"k": k}) or wrap manually.
+    raise NotImplementedError
 
-def generate_answer(query, context, llm):
-    """Generate an answer using the LLM and retrieved context."""
-    # TODO: Implement answer generation logic
-    pass
+
+def make_retriever_tool(retriever: Runnable) -> Tool:
+    """Wrap the retriever in a LangChain Tool with a descriptive name and docstring."""
+    # TODO: Provide Tool.from_function(...) or Tool(...) with callable=...
+    raise NotImplementedError
+
+
+def load_chat_model(model_name: str) -> BaseChatModel:
+    """Instantiate the chat model that will drive the agent's reasoning."""
+    # TODO: Return ChatOpenAI(model=model_name, api_key=...) or an Anthropic equivalent.
+    raise NotImplementedError
+
+
+def build_agent(llm: BaseChatModel, tool: Tool) -> AgentExecutor:
+    """Create an agent that can consult the retriever tool before answering."""
+    # TODO: Create a prompt template, call create_react_agent, and wrap it in AgentExecutor.
+    raise NotImplementedError
+
+
+def run_agent(agent: AgentExecutor, question: str) -> tuple[str, List[Document], List[dict]]:
+    """Execute the agent on a question and collect intermediate steps for reporting."""
+    # TODO: agent.invoke(..., return_intermediate_steps=True) to capture answer and retrieved docs.
+    raise NotImplementedError
+
+
+def display_result(answer: str, contexts: List[Document], steps: List[dict]) -> None:
+    """Pretty-print retrieved evidence and the final answer for manual grading."""
+    # TODO: Format intermediate steps, retrieved documents, and the final response.
+    raise NotImplementedError
+
+
+def main() -> None:
+    """CLI entry point: wire args -> retriever -> agent -> output."""
+    # TODO: Parse arguments, instantiate dependencies above, and call display_result.
+    raise NotImplementedError
+
 
 if __name__ == "__main__":
-    # Example usage (replace with your own logic)
-    # db = connect_chroma("./data/chroma")
-    # query = get_user_query()
-    # query_embedding = embed_query(query, embedding_model="your-model")
-    # context = retrieve_chunks(query_embedding, db)
-    # answer = generate_answer(query, context, llm="your-llm")
-    # print(answer)
-    pass
+    main()
 
-# Try running this script and see what happens!
