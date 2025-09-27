@@ -1,0 +1,6 @@
+[
+  {"id": "q001", "question": "What are the core steps in the ingestion pipeline?"},
+  {"id": "q002", "question": "Where is the Chroma index persisted and how is it rebuilt?"},
+  {"id": "q003", "question": "Explain how scores are used when retrieving contexts."}
+]
+
