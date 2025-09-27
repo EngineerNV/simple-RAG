@@ -30,7 +30,12 @@ from __future__ import annotations
 
 import argparse
 import os
-from dotenv import load_dotenv
+# Optional dependency; fall back to a no-op when not installed.
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional dependency
+    def load_dotenv(*_args, **_kwargs):  # type: ignore[return-type]
+        return False
 import sys
 import textwrap
 from pathlib import Path
@@ -39,7 +44,7 @@ from typing import List, Sequence, Tuple
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 """
 This script provides a minimal, runnable retrieval smoke-test so you can see the
@@ -62,6 +67,14 @@ SYSTEM_PROMPT = (
 RetrieverResult = List[Tuple[Document, float]]
 load_dotenv()
 
+
+class MissingAPIKeyError(RuntimeError):
+    """Raised when an LLM call is requested without an API key."""
+
+
+class LLMInvocationError(RuntimeError):
+    """Raised when the underlying LLM client fails to produce a response."""
+
 def load_vector_store(persist_dir: Path, embedding_model: HuggingFaceEmbeddings) -> Chroma:
     """Connect to the Chroma collection built during the indexing milestone."""
 
@@ -69,6 +82,17 @@ def load_vector_store(persist_dir: Path, embedding_model: HuggingFaceEmbeddings)
         raise FileNotFoundError(f"Chroma persist directory not found: {persist_dir}")
     store = Chroma(persist_directory=str(persist_dir), embedding_function=embedding_model)
     return store
+
+
+def create_retrieval_store(
+    model_name: str = DEFAULT_MODEL_NAME,
+    persist_dir: Path = CHROMA_DIR,
+) -> tuple[HuggingFaceEmbeddings, Chroma]:
+    """Instantiate embeddings and connect to the persisted Chroma store."""
+
+    embed = HuggingFaceEmbeddings(model_name=model_name)
+    store = load_vector_store(persist_dir, embed)
+    return embed, store
 
 
 def clean_snippet(text: str) -> str:
@@ -174,6 +198,19 @@ def compose_user_prompt(question: str, results: RetrieverResult) -> str:
     return "\n".join(lines).strip()
 
 
+def compose_messages(
+    question: str,
+    results: RetrieverResult,
+    system_prompt: str | None = None,
+) -> List[BaseMessage]:
+    """Create the chat messages for the retrieval-informed LLM call."""
+
+    return [
+        SystemMessage(content=system_prompt or SYSTEM_PROMPT),
+        HumanMessage(content=compose_user_prompt(question, results)),
+    ]
+
+
 def load_chat_model(
     provider: str,
     model_name: str,
@@ -202,14 +239,61 @@ def load_chat_model(
     return ChatOpenAI(**init_kwargs)
 
 
-def print_usage_metadata(response, show_usage: bool) -> None:
-    if not show_usage:
-        return
+def extract_text_from_response(response) -> str:
+    """Normalize the message content into a plain string for downstream use."""
+
+    content = response.content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for chunk in content:
+            if isinstance(chunk, dict):
+                parts.append(chunk.get("text", ""))
+            else:
+                parts.append(str(chunk))
+        final_text = " ".join(part for part in parts if part).strip()
+    else:
+        final_text = str(content).strip()
+    return final_text
+
+
+def extract_usage_metadata(response) -> dict | None:
     usage = None
     if hasattr(response, "response_metadata"):
         usage = response.response_metadata.get("token_usage") or response.response_metadata.get("usage")
     if not usage and hasattr(response, "additional_kwargs"):
         usage = response.additional_kwargs.get("usage")
+    return usage
+
+
+def call_chat_model(
+    messages: Sequence[BaseMessage],
+    provider: str,
+    model_name: str,
+    api_key: str | None,
+    temperature: float,
+    max_tokens: int,
+    base_url: str | None,
+) -> tuple[str, object, dict | None]:
+    """Call the chat model and return (text, raw_response, usage_metadata)."""
+
+    if not api_key:
+        raise MissingAPIKeyError("API key is required for live LLM calls.")
+
+    llm = load_chat_model(provider, model_name, api_key, temperature, max_tokens, base_url)
+    try:
+        response = llm.invoke(messages)
+    except Exception as exc:  # pragma: no cover - network/remote failure
+        raise LLMInvocationError(f"LLM call failed: {exc}") from exc
+
+    final_text = extract_text_from_response(response)
+    usage = extract_usage_metadata(response)
+    return final_text, response, usage
+
+
+def print_usage_metadata(response, show_usage: bool) -> None:
+    if not show_usage:
+        return
+    usage = extract_usage_metadata(response)
     if not usage:
         return
     print("\nUsage metadata:")
@@ -244,40 +328,25 @@ def run_llm_mode(
     show_usage: bool,
 ) -> None:
     emit_contexts(results, "=== Retrieved Evidence ===")
-    if not api_key:
+    messages = compose_messages(question, results)
+    try:
+        final_text, response, _ = call_chat_model(
+            messages=messages,
+            provider=provider,
+            model_name=model_name,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            base_url=base_url,
+        )
+    except MissingAPIKeyError:
         print("OpenAI API key missing. Falling back to mock answer.", file=sys.stderr)
         print_mock_answer(results)
         return
-
-    try:
-        llm = load_chat_model(provider, model_name, api_key, temperature, max_tokens, base_url)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         print_mock_answer(results)
         return
-
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=compose_user_prompt(question, results)),
-    ]
-    try:
-        response = llm.invoke(messages)
-    except Exception as exc:  # pragma: no cover - network/remote failure
-        print(f"LLM call failed ({exc}). Falling back to mock answer.", file=sys.stderr)
-        print_mock_answer(results)
-        return
-
-    content = response.content
-    if isinstance(content, list):
-        parts: List[str] = []
-        for chunk in content:
-            if isinstance(chunk, dict):
-                parts.append(chunk.get("text", ""))
-            else:
-                parts.append(str(chunk))
-        final_text = " ".join(part for part in parts if part).strip()
-    else:
-        final_text = str(content).strip()
 
     print("\n=== Final Answer ===\n")
     print(final_text or "I don't know.")
@@ -312,8 +381,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
 
-    embed = HuggingFaceEmbeddings(model_name=args.model)
-    store = load_vector_store(CHROMA_DIR, embed)
+    _, store = create_retrieval_store(model_name=args.model, persist_dir=CHROMA_DIR)
     results = retrieve_contexts(store, args.question, args.k)
 
     if args.agent_mode == "none":
