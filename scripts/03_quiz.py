@@ -1,10 +1,19 @@
 """03_quiz.py — interactive human metrics checklist for retrieval answers.
 
-This script complements the automatic heuristics in ``03_eval.py`` by letting a
-reviewer inspect the retrieved evidence, record qualitative tags, and decide
-whether an answer is faithful or should have abstained. Each reviewed example is
-persisted to JSONL/CSV so downstream tooling (``04_report.py``) can summarise
-the findings.
+The quiz mirrors the behaviour of :mod:`scripts.02_query` so reviewers can see
+exactly what the application would have returned. It focuses on three goals:
+
+1. **Inspect evidence** – surface retrieved contexts, similarity scores, and
+   lexical overlap with the answer so annotators can judge faithfulness.
+2. **Capture feedback quickly** – toggle faithfulness/abstain flags, attach tag
+   checklists, and jot down notes. Every save writes to JSONL/CSV for later
+   analysis and version control.
+3. **Show live progress** – after each annotation the script prints a snapshot
+   of running metrics (faithful %, abstain %, top tags) so reviewers immediately
+   understand trends without leaving the terminal.
+
+The resulting dataset is intentionally lightweight and can be fed into
+``04_report.py`` or any custom analytics notebook.
 """
 
 from __future__ import annotations
@@ -17,6 +26,7 @@ import random
 import re
 import sys
 import textwrap
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib import import_module
@@ -340,6 +350,17 @@ TAG_OPTIONS = [
     "other",
 ]
 
+TAG_ADVICE = {
+    "retrieval-miss": "Raise k, add metadata filters, or expand the corpus.",
+    "retrieval-partial": "Inspect chunk boundaries; try larger chunks or more overlap.",
+    "too-low-k": "Increase k or tune score thresholds before truncating.",
+    "chunking-issue": "Rebuild the index with bigger chunks or overlap to keep facts together.",
+    "prompt-overreach": "Tighten the system prompt and add refusal exemplars.",
+    "ambiguous-question": "Introduce clarifier prompts or request follow-up questions.",
+    "source-noise": "Clean noisy documents and rebuild the index.",
+    "other": "Review the free-form notes for bespoke fixes.",
+}
+
 
 def prompt_for_tags(current: List[str]) -> List[str]:
     print("Available tags (toggle by number, comma-separated):")
@@ -387,6 +408,81 @@ def render_review_card(record: ReviewRecord, width: int) -> None:
     print("=" * width)
 
 
+def summarise_progress(entries: Sequence[Mapping[str, object]]) -> Mapping[str, object]:
+    """Compute lightweight progress metrics for the current annotation session."""
+
+    total = len(entries)
+    faithful = 0
+    abstain = 0
+    overreach = 0
+    pending = 0
+    tag_counter: Counter[str] = Counter()
+
+    for entry in entries:
+        faithful_value = entry.get("faithful")
+        abstain_value = entry.get("should_abstain")
+
+        if faithful_value is True:
+            faithful += 1
+        elif faithful_value is False and abstain_value is False:
+            overreach += 1
+
+        if abstain_value is True:
+            abstain += 1
+
+        if faithful_value is None or abstain_value is None:
+            pending += 1
+
+        tags = entry.get("tags")
+        if isinstance(tags, str):
+            tag_counter.update(tag for tag in tags.split(",") if tag)
+        elif isinstance(tags, Iterable):
+            tag_counter.update(str(tag) for tag in tags)
+
+    return {
+        "total": total,
+        "faithful": faithful,
+        "abstain": abstain,
+        "overreach": overreach,
+        "pending": pending,
+        "top_tags": tag_counter.most_common(5),
+    }
+
+
+def print_progress_snapshot(entries: Sequence[Mapping[str, object]]) -> None:
+    """Pretty-print the current progress snapshot for terminal feedback."""
+
+    if not entries:
+        return
+
+    snapshot = summarise_progress(entries)
+    total = snapshot["total"] or 1
+    faithful_pct = snapshot["faithful"] / total
+    abstain_pct = snapshot["abstain"] / total
+    overreach_pct = snapshot["overreach"] / total
+    pending = snapshot["pending"]
+
+    print(
+        "[progress] Reviewed {total} items | Faithful {faithful_pct:.1%} | Abstain {abstain_pct:.1%} | Overreach {overreach_pct:.1%}".format(
+            total=snapshot["total"],
+            faithful_pct=faithful_pct,
+            abstain_pct=abstain_pct,
+            overreach_pct=overreach_pct,
+        )
+    )
+    if pending:
+        print(f"[progress] {pending} item(s) are missing a faithfulness or abstain label.")
+
+    top_tags = snapshot["top_tags"]
+    if top_tags:
+        tags_preview = ", ".join(f"{tag} ({count})" for tag, count in top_tags)
+        print(f"[progress] Top tags: {tags_preview}")
+        lead_tag, _ = top_tags[0]
+        advice = TAG_ADVICE.get(lead_tag)
+        if advice:
+            print(f"[progress] Tip: {advice}")
+
+
 def interactive_loop(
     records: List[ReviewRecord],
     existing: Dict[str, MutableMapping[str, object]],
@@ -400,6 +496,9 @@ def interactive_loop(
         for entry in existing.values():
             saved_entries.append(dict(entry))
             id_to_entry[entry["id"]] = entry
+
+    if saved_entries:
+        print_progress_snapshot(saved_entries)
 
     for record in records:
         if record.id in id_to_entry:
@@ -428,6 +527,7 @@ def interactive_loop(
                 save_reviews_jsonl(jsonl_path, saved_entries)
                 save_reviews_csv(csv_path, saved_entries)
                 print(f"Saved review for {record.id}.")
+                print_progress_snapshot(saved_entries)
                 break
             if cmd == "f":
                 record.faithful = not record.faithful if record.faithful is not None else True
@@ -452,6 +552,7 @@ def interactive_loop(
 
     save_reviews_jsonl(jsonl_path, saved_entries)
     save_reviews_csv(csv_path, saved_entries)
+    print_progress_snapshot(saved_entries)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

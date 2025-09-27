@@ -1,13 +1,18 @@
-"""04_report.py — aggregate human quiz labels into actionable summaries."""
+"""04_report.py — aggregate human quiz labels into actionable summaries.
+
+The script is intentionally small: it ingests one or more JSONL/CSV files from
+``03_quiz.py``, prints a console digest (coverage, faithfulness, abstain rate,
+top tags), and optionally writes a short Markdown note. The aim is to give
+reviewers a quick feedback loop rather than a sprawling analytics suite.
+"""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
-import math
 import statistics
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
@@ -126,18 +131,15 @@ def summarise(records: Sequence[Mapping[str, object]]) -> Dict[str, object]:
 def render_distribution(values: Sequence[float]) -> str:
     if not values:
         return "(no data)"
-    buckets = [(0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.0)]
-    counts: List[int] = [0 for _ in buckets]
+    bucket_labels = ["0.0-0.2", "0.2-0.4", "0.4-0.6", "0.6-0.8", "0.8-1.0"]
+    counts = [0] * len(bucket_labels)
     for value in values:
-        for idx, (low, high) in enumerate(buckets):
-            upper = 1.0 if math.isclose(high, 1.0) else high
-            if low <= value < upper or (math.isclose(value, upper) and upper == 1.0):
-                counts[idx] += 1
-                break
+        idx = min(len(counts) - 1, max(0, int(value * 5)))
+        counts[idx] += 1
     lines = []
-    for (low, high), count in zip(buckets, counts):
+    for label, count in zip(bucket_labels, counts):
         bar = "#" * count
-        lines.append(f"[{low:.1f}, {high:.1f}) {count:>3}: {bar}")
+        lines.append(f"[{label}] {count:>3}: {bar}")
     return "\n".join(lines)
 
 
@@ -162,7 +164,7 @@ def print_console_summary(summary: Mapping[str, object]) -> None:
     tags: Counter[str] = summary.get("tags", Counter())
     if tags:
         print("Top tags:")
-        most_common = tags.most_common(8)
+        most_common = tags.most_common(5)
         for tag, count in most_common:
             bar = "#" * count
             print(f"  {tag:20s} {count:>3} {bar}")
@@ -180,67 +182,13 @@ ACTIONABLE_INTERVENTIONS = {
 }
 
 
-def format_table(rows: List[Sequence[str]]) -> str:
-    widths = [max(len(str(cell)) for cell in column) for column in zip(*rows)]
-    lines = []
-    for row in rows:
-        padded = [str(cell).ljust(width) for cell, width in zip(row, widths)]
-        lines.append(" | ".join(padded))
-    return "\n".join(lines)
+def write_markdown(path: Path, summary: Mapping[str, object]) -> None:
+    """Persist a concise Markdown overview for asynchronous sharing."""
 
-
-def group_by(records: Sequence[Mapping[str, object]], key: str) -> Dict[str, List[Mapping[str, object]]]:
-    grouped: Dict[str, List[Mapping[str, object]]] = defaultdict(list)
-    for row in records:
-        grouped[str(row.get(key, "unknown"))].append(row)
-    return grouped
-
-
-def compute_threshold(values: Sequence[float], labels: Sequence[bool]) -> float | None:
-    if not values or not labels or len(values) != len(labels):
-        return None
-    paired = sorted(zip(values, labels), key=lambda pair: pair[0])
-    unique_values = sorted({value for value, _ in paired})
-    best_threshold = None
-    best_accuracy = -1.0
-    for threshold in unique_values:
-        predictions = [value >= threshold for value, _ in paired]
-        accuracy = sum(pred == label for pred, (_, label) in zip(predictions, paired)) / len(paired)
-        if accuracy > best_accuracy:
-            best_accuracy = accuracy
-            best_threshold = threshold
-    return best_threshold
-
-
-def recommend_thresholds(records: Sequence[Mapping[str, object]]) -> Dict[str, float | None]:
-    faithful_mask: List[bool] = []
-    max_scores: List[float] = []
-    overlaps: List[float] = []
-    for row in records:
-        faithful = coerce_bool(row.get("faithful"))
-        if faithful is None:
-            continue
-        max_score = extract_float(row.get("max_score"))
-        overlap = extract_float(row.get("overlap_ratio"))
-        if max_score is not None and overlap is not None:
-            faithful_mask.append(faithful)
-            max_scores.append(max_score)
-            overlaps.append(overlap)
-    tau_s = compute_threshold(max_scores, faithful_mask) if faithful_mask else None
-    tau_f = compute_threshold(overlaps, faithful_mask) if faithful_mask else None
-    return {"tau_s": tau_s, "tau_f": tau_f}
-
-
-def write_markdown(
-    path: Path,
-    records: Sequence[Mapping[str, object]],
-    summary: Mapping[str, object],
-    thresholds: Mapping[str, float | None],
-) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     lines: List[str] = []
-    lines.append("# Human Evaluation Report")
+    lines.append("# Human Evaluation Snapshot")
     lines.append("")
     lines.append(f"Total reviewed examples: **{summary['total']}**")
     lines.append(
@@ -248,68 +196,28 @@ def write_markdown(
     )
     lines.append("")
 
-    def stats_table(group_key: str) -> List[str]:
-        group_rows = [[group_key, "N", "Faithful %", "Abstain %", "Overreach %"]]
-        grouped = group_by(records, group_key)
-        for key, group in sorted(grouped.items()):
-            group_summary = summarise(group)
-            group_rows.append(
-                [
-                    key,
-                    str(len(group)),
-                    f"{group_summary['faithful_pct']:.1%}",
-                    f"{group_summary['abstain_pct']:.1%}",
-                    f"{group_summary['overreach_pct']:.1%}",
-                ]
-            )
-        return ["## Metrics by " + group_key, "", format_table(group_rows), ""]
-
-    lines.extend(stats_table("agent_mode"))
-    lines.extend(stats_table("k"))
-
-    lines.append("## Score Distributions")
-    lines.append("")
     if summary.get("max_scores"):
+        lines.append("## Retrieval score trends")
+        lines.append("")
         lines.append("**Max score buckets**")
         lines.append("```")
         lines.append(render_distribution(summary["max_scores"]))
         lines.append("```")
-    if summary.get("mean_scores"):
-        lines.append("**Mean score buckets**")
-        lines.append("```")
-        lines.append(render_distribution(summary["mean_scores"]))
-        lines.append("```")
-    lines.append("")
+        if summary.get("mean_scores"):
+            lines.append("**Mean score buckets**")
+            lines.append("```")
+            lines.append(render_distribution(summary["mean_scores"]))
+            lines.append("```")
+        lines.append("")
 
     tags: Counter[str] = summary.get("tags", Counter())
     if tags:
-        lines.append("## Tag Spotlight")
+        lines.append("## What reviewers flagged")
         lines.append("")
-        lines.append("| Tag | Count | Recommendation |")
-        lines.append("| --- | ---: | --- |")
         for tag, count in tags.most_common():
-            recommendation = ACTIONABLE_INTERVENTIONS.get(tag, "Review associated notes.")
-            lines.append(f"| {tag} | {count} | {recommendation} |")
+            guidance = ACTIONABLE_INTERVENTIONS.get(tag, "Review associated notes.")
+            lines.append(f"- **{tag}** ({count}) — {guidance}")
         lines.append("")
-
-    lines.append("## Actionable Playbook")
-    lines.append("")
-    for tag, recommendation in ACTIONABLE_INTERVENTIONS.items():
-        lines.append(f"- **{tag}** — {recommendation}")
-    lines.append("")
-
-    tau_s = thresholds.get("tau_s")
-    tau_f = thresholds.get("tau_f")
-    lines.append("## Threshold Suggestions")
-    lines.append("")
-    if tau_s is None or tau_f is None:
-        lines.append("Not enough labeled data to suggest thresholds yet.")
-    else:
-        lines.append(
-            f"Consider enforcing max_score ≥ **{tau_s:.3f}** (τ_s) and overlap_ratio ≥ **{tau_f:.3f}** (τ_f)"
-            " to favour faithful answers."
-        )
-    lines.append("")
 
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines))
@@ -332,8 +240,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     summary = summarise(records)
     print_console_summary(summary)
-    thresholds = recommend_thresholds(records)
-    write_markdown(Path(args.out), records, summary, thresholds)
+    write_markdown(Path(args.out), summary)
 
 
 if __name__ == "__main__":

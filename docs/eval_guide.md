@@ -1,137 +1,132 @@
 # Human Evaluation Guide
 
-This guide explains how to run the interactive quiz (`03_quiz.py`), interpret the
-saved JSONL/CSV rows, and turn the aggregated report (`04_report.py`) into
-practical next steps for the retrieval pipeline.
+This guide explains how to capture human feedback with `scripts/03_quiz.py`,
+understand the saved JSONL/CSV fields, and turn the lightweight report from
+`scripts/04_report.py` into concrete retrieval or prompting changes.
 
-## 1. Running the Quiz
+## 1. Prepare Your Corpus and Prompts
+
+1. Add your markdown sources under `data/corpus/` (e.g., `data/corpus/manual.md`).
+2. Build the index once the corpus looks right:
+   ```bash
+   python scripts/01_build_index.py --chunk-size 1200 --chunk-overlap 200
+   ```
+3. Create a questions file such as `data/questions/dev.json` containing objects
+   with `id` and `question` keys:
+   ```json
+   [
+     {"id": "ingest-001", "question": "How do we rebuild the vector store?"},
+     {"id": "prompt-002", "question": "When should the assistant abstain?"}
+   ]
+   ```
+
+## 2. Run the Interactive Quiz
+
+Launch the reviewer loop with the same retrieval/LLM settings you ship in the
+application:
 
 ```bash
 python scripts/03_quiz.py \
-  --questions data/dev_prompts.json \
+  --questions data/questions/dev.json \
   --agent-mode pretend \
   --k 3 \
   --out data/human_review.jsonl \
   --resume
 ```
 
-Key flags:
+Key tips:
 
-* `--questions`: JSON array of `{"id": ..., "question": ...}` objects.
-* `--agent-mode`: matches `scripts/02_query.py` (`none`, `pretend`, `llm`).
-* `--resume`: append to an existing JSONL instead of overwriting it.
-* `--only-unlabeled`: skip items that already have both `faithful` and
-  `should_abstain` decisions.
-* `--page-width`: wrap interactive output to match your terminal width.
+* `--agent-mode` mirrors `scripts/02_query.py` (`none`, `pretend`, `llm`). Use
+  the mode you want to audit.
+* `--resume` appends to an existing JSONL so you can label in multiple sessions.
+* `--only-unlabeled` filters out entries that already have both faithfulness and
+  abstain labels.
+* `--page-width` controls terminal wrapping for questions, answers, and
+  snippets.
 
-During the quiz press:
+While reviewing, press:
 
-* `f` to toggle the **Faithful** flag.
+* `f` to toggle **Faithful**.
 * `a` to toggle **Should Abstain**.
 * `m` to open the tag checklist (retrieval-miss, prompt-overreach, etc.).
 * `n` to add free-form notes.
-* `Enter` to save the current card and move on, `s` to skip, `q` to quit.
+* `Enter` to save the current card, `s` to skip without saving, `q` to quit.
 
-Each save writes a JSON line resembling:
+Every time you save, the quiz prints a **progress snapshot** summarising the
+running faithful %, abstain %, overreach rate, and the most common tags. This
+feedback loop highlights trends immediately—no external tooling required.
+
+### Saved Row Anatomy
+
+Each save appends a JSON object similar to:
 
 ```json
 {
-  "id": "q002",
-  "question": "Where is the Chroma index persisted and how is it rebuilt?",
-  "answer": "Answer (synthesized from sources [0,1]): ...",
+  "id": "ingest-001",
+  "question": "How do we rebuild the vector store?",
+  "answer": "Answer (synthesised from sources [0,1]): ...",
   "agent_mode": "pretend",
   "k": 3,
   "contexts": [
-    {
-      "rank": 0,
-      "score": 0.812,
-      "metadata": {"source": "data/corpus/pipeline.md"},
-      "snippet": "The Chroma index persists under data/chroma ..."
-    }
+    {"rank": 0, "score": 0.81, "metadata": {"source": "handbook.md"}, "snippet": "..."}
   ],
-  "max_score": 0.812,
-  "mean_score": 0.654,
-  "overlap_ratio": 0.41,
+  "max_score": 0.81,
+  "mean_score": 0.63,
+  "overlap_ratio": 0.42,
   "faithful": true,
   "should_abstain": false,
   "tags": ["prompt-overreach"],
-  "notes": "Call out missing rebuild instructions.",
-  "timestamp": "2024-05-10T18:22:04.123456+00:00"
+  "notes": "Mention missing rebuild CLI.",
+  "timestamp": "2024-05-11T18:22:04.123456+00:00"
 }
 ```
 
-The accompanying CSV mirrors the headline columns so that spreadsheets or BI
-tools can ingest the dataset quickly.
+A mirrored CSV keeps the headline columns for spreadsheet workflows. Reviewers
+can also edit the JSONL manually if a typo slips through.
 
-## 2. Reading the Report
+## 3. Generate a Snapshot Report
 
-Aggregate existing annotations with:
+After a labeling session, run:
 
 ```bash
 python scripts/04_report.py --in data/human_review.jsonl --out reports/human_eval_report.md
 ```
 
-The console output surfaces headline KPIs:
+The script prints totals, faithful %, abstain %, overreach %, score
+means/medians, score distributions, and the top tags with counts. The optional
+Markdown file captures the same summary plus the actionable guidance for async
+sharing (paste it into docs, issues, or Slack).
 
-* **Faithful %** – proportion of answers marked `faithful=true`.
-* **Proper abstain %** – proportion of answers tagged `should_abstain=true`.
-* **Overreach rate** – answers that were **not** faithful and **not** abstaining.
-* Mean/median **max_score** and **mean_score** – quick proxies for retrieval
-  strength.
+## 4. Act on the Feedback
 
-The Markdown report adds:
+Use the built-in tag recommendations as a checklist:
 
-* Tables sliced by `agent_mode` and `k` so you can compare configurations.
-* Histogram-style distributions (ASCII buckets) for retrieval scores.
-* Tag spotlight table with tailored interventions.
-* Threshold suggestions (`τ_s` for `max_score`, `τ_f` for overlap) showing where a
-  simple rule might separate faithful and unfaithful answers.
+* **retrieval-miss** — raise `k`, introduce metadata filters, or broaden the
+  corpus.
+* **retrieval-partial** — adjust chunk sizes/overlap so facts do not split across
+  documents.
+* **too-low-k** — increase the CLI `--k` or implement a similarity threshold
+  before truncating.
+* **chunking-issue** — rebuild via `scripts/01_build_index.py` with larger chunks
+  or higher overlap.
+* **prompt-overreach** — tighten `SYSTEM_PROMPT` and include refusal exemplars so
+  the LLM abstains without evidence.
+* **ambiguous-question** — add clarifying prompts or template the answer format.
+* **source-noise** — clean noisy corpus files and rebuild the index.
+* **other** — read the free-form notes for bespoke fixes.
 
-To compare progress over time, commit each `reports/human_eval_report.md` to a
-dated branch or folder (e.g., `reports/2024-05-10_human_eval.md`) and diff the
-tables/metrics between runs.
+## 5. Iterate
 
-## 3. Turning Metrics into Action
+1. Adjust the pipeline (retrieval settings, prompt, corpus) based on the top
+   tags.
+2. Rebuild the index if corpus or chunking changed:
+   ```bash
+   python scripts/01_build_index.py --chunk-size 1500 --chunk-overlap 250
+   ```
+3. Re-run the quiz on the same question set (use `--resume` to append or drop
+   the previous JSONL for a fresh run).
+4. Compare report snapshots over time by keeping date-stamped copies in
+   `reports/` and using `git diff` or a Markdown-aware viewer.
 
-Use the checklist below to translate the most common tags into pipeline tweaks:
-
-* **retrieval-miss** – raise `k`, improve metadata filters, or add new documents.
-* **retrieval-partial** – inspect split boundaries; chunk overlap may be too
-  narrow.
-* **too-low-k** – increase the CLI `--k` or implement dynamic cut-offs based on
-  similarity score.
-* **chunking-issue** – rerun the index build (`python scripts/01_build_index.py`)
-  with larger `--chunk-size` / `--chunk-overlap` arguments (see CLI in the
-  script) and ensure the build summary lists the expected document count and
-  metadata keys.
-* **prompt-overreach** – add refusal exemplars to `SYSTEM_PROMPT` and emphasise
-  abstention when no evidence is cited.
-* **ambiguous-question** – create a clarifier prompt template or follow-up flow
-  before answering.
-* **source-noise** – audit the corpus (e.g., `data/corpus/`) for outdated or
-  irrelevant files and rebuild once cleaned.
-* **other** – inspect the reviewer notes in the JSONL for bespoke actions.
-
-After adjusting chunk sizes, overlaps, or the prompt, rebuild and re-run:
-
-```bash
-python scripts/01_build_index.py --chunk-size 1200 --chunk-overlap 200
-python scripts/03_quiz.py --questions data/dev_prompts.json --resume
-python scripts/04_report.py --in data/human_review.jsonl
-```
-
-Confirm that the build step prints the intended collection name, document count,
-and metadata keys—these cues verify that the configuration changes took effect.
-
-## 4. Comparing Reports Over Time
-
-* Store previous reports in `reports/` with date-stamped filenames.
-* Use `git diff reports/old.md reports/new.md` (or a Markdown-aware diff viewer)
-  to spot shifts in faithful %, abstain %, and top tags.
-* Track the recommended thresholds; converging `τ_s` and `τ_f` values indicate
-  your retrieval quality is stabilising, while big swings suggest the pipeline
-  still needs tuning.
-
-Iterate until the overreach rate is comfortably low and the dominant tags map to
-known, addressable causes.
-
+Repeat until overreach is rare and dominant tags map to deliberate, fixable
+causes.
