@@ -1,29 +1,10 @@
-"""02_query.py  connect the retriever and a simple retrieval-based answerer.
+"""02_query.py — retrieve contexts and optionally call a chat model.
 
-Teacher briefing
------------------
-This milestone demonstrates how the vector index supports interactive QA. Build a
-small LangChain agent that exposes the Chroma retriever as a tool and lets a chat
-model decide how to answer. Showcase both the retrieved evidence and the model's
-final response so reviewers can trace the reasoning path.
-
-Implementation checklist
-------------------------
-1. Load the embedding model and persisted Chroma store created in milestone 1.
-2. Wrap the store in a retriever (`as_retriever` or `VectorStoreRetriever`).
-3. Register the retriever as a LangChain `Tool` so the agent can call it.
-4. Instantiate a chat model (``ChatOpenAI`` or ``ChatAnthropic``) and construct an
-   agent (`create_react_agent`, `AgentExecutor`, or a RetrievalQA chain wrapped as a tool).
-5. Collect a user question, run it through the agent, and print:
-   - the retrieved chunks (with metadata and scores) and
-   - the model's answer or an explicit abstain message when no evidence is found.
-6. Support configuration for ``k`` (retrieval depth) and model name via CLI flags.
-
-Stretch goals
--------------
-- Cache or display token usage for transparency.
-- Allow batch querying from a file of questions.
-- Persist conversation history for follow-up questions.
+The CLI shipped here connects to the persisted Chroma store, retrieves the top-k
+contexts for a supplied question, and offers three execution modes:
+``none`` (print contexts + stitched answer), ``pretend`` (prompt preview with
+mocked citations), and ``llm`` (live OpenAI-compatible call). Use it to validate
+your index before integrating richer agents.
 """
 
 from __future__ import annotations

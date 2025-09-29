@@ -1,29 +1,9 @@
-"""03_eval.py — judge groundedness and abstention for the agent's answers.
+"""03_eval.py — score question/answer/context rows with lexical heuristics.
 
-Teacher briefing
-----------------
-This milestone closes the loop on your RAG agent. We now provide a *repeatable*
-way to generate evaluation data directly from the retrieval script, calculate a
-few light-weight heuristics, and surface aggregate metrics that inform prompt or
-index adjustments. The script intentionally prints detailed commentary so that
-future students can follow the reasoning process.
-
-Implementation checklist
-------------------------
-1. Optionally call the query pipeline (``02_query``) to produce answer/context
-   pairs for a batch of questions.
-2. Implement ``is_faithful`` to flag hallucinated answers—consider keyword
-   overlap, cited source markers, or a secondary LLM judge.
-3. Implement ``should_abstain`` to catch weak retrieval (short context, low
-   scores, etc.).
-4. Summarize the evaluation run with aggregate metrics and optionally persist
-   per-example reports for reflection.
-
-Stretch goals
--------------
-- Track precision/recall style metrics if you have human labels.
-- Persist JSON/CSV reports for inclusion in your homework submission.
-- Surface a few representative failure cases for discussion.
+Given a CSV or JSON file of saved QA examples, this script normalises the
+contexts, measures overlap with the answer, flags potential hallucinations, and
+summarises results with aggregate statistics. Use it to spot regression after
+prompt or retrieval tweaks.
 """
 
 import argparse

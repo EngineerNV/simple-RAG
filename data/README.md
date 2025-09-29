@@ -1,26 +1,16 @@
 # data/
 
-This folder is for all data-related assets in your RAG project.
+This directory holds all runtime assets for the retrieval pipeline. The repository includes empty `corpus/` and `chroma/` folders so you can start experimenting immediately—no need to create them by hand.
 
 ## Structure
 
-- `corpus/` — Place your source documents here. These can be PDFs, text files, or any data you want to use for retrieval.
-- `chroma/` — This is where the Chroma vector database will store its persistent data. You don't need to manually edit anything here.
+- `corpus/` — Drop your source documents here (markdown or plain text work best with the default ingestion script). Files are ignored by version control so you can keep your own notes locally.
+- `chroma/` — `scripts/01_build_index.py` recreates this directory on each run and stores the persisted Chroma collection. Delete it between experiments to rebuild from scratch.
 
-## How to use
+## Workflow tips
 
-1. **Add Documents:**
-   - Drop your documents into the `corpus/` folder. Try different file types and see how ingestion scripts handle them.
-   - Experiment with adding, removing, or modifying files to see how it affects the RAG pipeline.
+1. **Populate the corpus:** copy markdown files into `corpus/`, then run `python scripts/00_ingest.py` to verify chunking.
+2. **Persist embeddings:** execute `python scripts/01_build_index.py` after updating the corpus so the retriever uses the latest content.
+3. **Keep things tidy:** it is safe to clear `chroma/` or replace files under `corpus/` whenever you want to iterate on the dataset.
 
-2. **Chroma Persistence:**
-   - After running the indexing script, check the `chroma/` folder to see what files are created.
-   - Try deleting the `chroma/` folder and re-running the index script to observe what happens.
-
-## Learning Opportunities
-
-- Try to write a script that lists all files in `corpus/`.
-- Experiment with reading a file from `corpus/` in Python.
-- Look up how to check if `chroma/` exists and create it if missing.
-
-> **Tip:** Use comments in your scripts to document what each step does. This will help you and others learn more effectively.
+The `.gitkeep` placeholders ensure the directories stay in git even when they are empty—you can ignore or delete them during local runs.
