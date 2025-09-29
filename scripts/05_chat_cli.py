@@ -1,8 +1,9 @@
 """05_chat_cli.py — playful terminal chat interface backed by the RAG pipeline.
 
 This script turns the retrieval pipeline into an interactive chat experience. It
-keeps a running conversation, periodically summarises the dialogue so the LLM can
-carry context, and surfaces the retrieved snippets that ground each answer.
+keeps a running conversation, maintains a rolling summary via LangChain memory so
+the LLM can carry context, and surfaces the retrieved snippets that ground each
+answer.
 """
 
 from __future__ import annotations
@@ -32,14 +33,19 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
+from langchain.memory import ConversationSummaryBufferMemory
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables.history import RunnableWithMessageHistory
+
 query_module = import_module("scripts.02_query")
 
-LLMInvocationError = query_module.LLMInvocationError  # type: ignore[attr-defined]
-MissingAPIKeyError = query_module.MissingAPIKeyError  # type: ignore[attr-defined]
-call_chat_model = query_module.call_chat_model  # type: ignore[attr-defined]
 clean_snippet = query_module.clean_snippet  # type: ignore[attr-defined]
-compose_messages = query_module.compose_messages  # type: ignore[attr-defined]
 create_retrieval_store = query_module.create_retrieval_store  # type: ignore[attr-defined]
+load_chat_model = query_module.load_chat_model  # type: ignore[attr-defined]
+compose_user_prompt = query_module.compose_user_prompt  # type: ignore[attr-defined]
 retrieve_contexts = query_module.retrieve_contexts  # type: ignore[attr-defined]
 
 
@@ -48,63 +54,53 @@ DEFAULT_SYSTEM_PROMPT = (
     "to answer the user, cite sources as [source #], keep the tone conversational, "
     "and acknowledge when information is missing."
 )
-SUMMARY_SYSTEM_PROMPT = (
-    "Summarise the ongoing conversation between the assistant and the user. "
-    "Capture key topics, decisions, and follow-ups in 3 bullet points or fewer."
-)
 DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_LLM_MODEL = "gpt-5-mini"
 CHROMA_DIR = Path("data") / "chroma"
 
 
 @dataclass
-class ConversationTurn:
-    speaker: str
-    content: str
-    contexts: Sequence[str] | None = None
+class TranscriptLog:
+    """Tracks retrieved contexts for each user turn."""
 
+    user_contexts: List[Sequence[str]] = field(default_factory=list)
 
-@dataclass
-class ConversationState:
-    summary_every: int
-    turns: List[ConversationTurn] = field(default_factory=list)
-    summary: str = ""
-    user_turns_since_summary: int = 0
-
-    def add_user_turn(self, message: str, contexts: Sequence[str]) -> None:
-        self.turns.append(ConversationTurn("user", message, contexts))
-        self.user_turns_since_summary += 1
-
-    def add_assistant_turn(self, message: str) -> None:
-        self.turns.append(ConversationTurn("assistant", message))
+    def add_user_context(self, contexts: Sequence[str]) -> None:
+        self.user_contexts.append(contexts)
 
     def reset(self) -> None:
-        self.turns.clear()
-        self.summary = ""
-        self.user_turns_since_summary = 0
+        self.user_contexts.clear()
 
-    def needs_summary(self) -> bool:
-        if self.summary_every <= 0:
-            return False
-        return self.user_turns_since_summary >= self.summary_every
+    def iter_user_contexts(self) -> Iterable[Sequence[str]]:
+        return iter(self.user_contexts)
 
-    def mark_summarised(self, new_summary: str) -> None:
-        self.summary = new_summary.strip()
-        self.user_turns_since_summary = 0
 
-    def recent_dialogue(self, window: int = 4) -> List[str]:
-        excerpt: List[str] = []
-        for turn in self.turns[-window:]:
-            prefix = "User" if turn.speaker == "user" else "Assistant"
-            excerpt.append(f"{prefix}: {turn.content}")
-        return excerpt
+class SummaryHistoryAdapter(BaseChatMessageHistory):
+    """Adapts ``ConversationSummaryBufferMemory`` for runnable message history."""
 
-    def transcript_text(self) -> str:
-        lines = []
-        for turn in self.turns:
-            prefix = "User" if turn.speaker == "user" else "Assistant"
-            lines.append(f"{prefix}: {turn.content}")
-        return "\n".join(lines)
+    def __init__(self, memory: ConversationSummaryBufferMemory):
+        self._memory = memory
+
+    @property
+    def memory(self) -> ConversationSummaryBufferMemory:
+        return self._memory
+
+    @property
+    def messages(self) -> List[BaseMessage]:
+        stored = self._memory.load_memory_variables({}).get(self._memory.memory_key, [])
+        return list(stored) if isinstance(stored, Iterable) else []
+
+    def add_message(self, message: BaseMessage) -> None:
+        self._memory.chat_memory.add_message(message)
+        self._memory.prune()
+
+    def add_messages(self, messages: Iterable[BaseMessage]) -> None:
+        for message in messages:
+            self._memory.chat_memory.add_message(message)
+        self._memory.prune()
+
+    def clear(self) -> None:
+        self._memory.clear()
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -118,7 +114,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature for the chat model")
     parser.add_argument("--max-tokens", type=int, default=700, help="Maximum tokens per LLM response")
     parser.add_argument("--base-url", dest="base_url", help="Optional base URL for OpenAI-compatible endpoints")
-    parser.add_argument("--summary-every", type=int, default=5, help="Summarise the chat after this many user turns (0 disables)")
     parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT, help="System prompt that governs assistant behaviour")
     parser.add_argument("--show-context", action="store_true", help="Display retrieved snippets for each answer")
     parser.add_argument("--save-transcript", dest="transcript_path", help="Optional file path to write the chat transcript on exit")
@@ -159,63 +154,43 @@ def render_context_table(results, console: Console) -> None:
     console.print(table)
 
 
-def build_question_payload(user_message: str, state: ConversationState) -> str:
-    sections: List[str] = []
-    if state.summary:
-        sections.append("Conversation summary so far:\n" + state.summary)
-    recent_dialogue = state.recent_dialogue()
-    if recent_dialogue:
-        sections.append("Recent exchanges:\n" + "\n".join(recent_dialogue))
-    sections.append("Current user message:\n" + user_message)
-    return "\n\n".join(sections)
-
-
-def summarise_history(state: ConversationState, console: Console, provider: str, model_name: str,
-                      api_key: str | None, temperature: float, max_tokens: int, base_url: str | None) -> str:
-    transcript = state.transcript_text()
-    if not transcript.strip():
-        return state.summary
-
-    question = "Please produce an updated running summary of the conversation so far."
-    instructions = SUMMARY_SYSTEM_PROMPT
-
-    try:
-        messages = compose_messages(question, [], system_prompt=SUMMARY_SYSTEM_PROMPT)
-        # Override the human message content with the summary-specific payload.
-        messages[-1].content = f"{instructions}\n\nConversation transcript:\n{transcript}"
-        summary_text, _, _ = call_chat_model(
-            messages=messages,
-            provider=provider,
-            model_name=model_name,
-            api_key=api_key,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            base_url=base_url,
-        )
-        return summary_text or state.summary
-    except MissingAPIKeyError:
-        console.print("[yellow]No API key available; storing a compact manual summary instead.[/yellow]")
-    except (LLMInvocationError, RuntimeError) as exc:
-        console.print(f"[yellow]Summary generation failed ({exc}). Using heuristic fallback.[/yellow]")
-
-    # Fallback heuristic: keep the last few turns as a lightweight summary.
-    recent = " ".join(state.recent_dialogue(window=6))
-    return textwrap.shorten(recent, width=320, placeholder="…")
-
-
-def save_transcript(state: ConversationState, path: Path, console: Console) -> None:
+def save_transcript(
+    memory: ConversationSummaryBufferMemory,
+    transcript_log: TranscriptLog,
+    path: Path,
+    console: Console,
+) -> None:
     try:
         lines = []
-        if state.summary:
-            lines.append("# Conversation summary\n" + state.summary + "\n")
-        for turn in state.turns:
-            prefix = "User" if turn.speaker == "user" else "Assistant"
-            lines.append(f"## {prefix}\n{turn.content}\n")
-            if turn.contexts:
-                lines.append("Retrieved contexts:\n")
-                for ctx in turn.contexts:
-                    lines.append(f"- {ctx}")
-                lines.append("")
+        summary_text = memory.moving_summary_buffer.strip()
+        if summary_text:
+            lines.append("# Conversation summary\n" + summary_text + "\n")
+
+        user_contexts = list(transcript_log.iter_user_contexts())
+        user_index = 0
+        history_messages = memory.load_memory_variables({}).get(memory.memory_key, [])
+
+        for message in history_messages:
+            if (
+                isinstance(message, memory.summary_message_cls)
+                and message.content == memory.moving_summary_buffer
+            ):
+                # The summary is already recorded above; skip the placeholder message.
+                continue
+
+            if isinstance(message, HumanMessage):
+                lines.append(f"## User\n{message.content}\n")
+                if user_index < len(user_contexts) and user_contexts[user_index]:
+                    lines.append("Retrieved contexts:\n")
+                    for ctx in user_contexts[user_index]:
+                        lines.append(f"- {ctx}")
+                    lines.append("")
+                user_index += 1
+            elif isinstance(message, AIMessage):
+                lines.append(f"## Assistant\n{message.content}\n")
+            else:
+                speaker = message.__class__.__name__
+                lines.append(f"## {speaker}\n{message.content}\n")
         path.write_text("\n".join(lines), encoding="utf-8")
         console.print(f"[green]Transcript written to {path}[/green]")
     except Exception as exc:  # pragma: no cover - filesystem failure
@@ -242,18 +217,55 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         sys.exit(1)
 
+    try:
+        llm = load_chat_model(
+            provider=provider,
+            model_name=args.llm_model,
+            api_key=api_key,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            base_url=args.base_url,
+        )
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
+
+    memory = ConversationSummaryBufferMemory(
+        llm=llm,
+        memory_key="chat_history",
+        return_messages=True,
+        max_token_limit=max(args.max_tokens * 2, 1200),
+    )
+    history_adapter = SummaryHistoryAdapter(memory)
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", "{system_prompt}"),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{user_message}"),
+        ]
+    )
+    response_chain = prompt | llm | StrOutputParser()
+    chat_with_history = RunnableWithMessageHistory(
+        response_chain,
+        lambda _session_id: history_adapter,
+        input_messages_key="user_message",
+        history_messages_key="chat_history",
+    )
+
     console.print(
         Panel(
             Text(
-                "Type your message to converse with the RAG assistant. Commands: /help, /exit, /reset, /summary, /showctx",
+                "Type your message to converse with the RAG assistant. Commands: /help, /exit, /reset, /showctx",
                 style="cyan",
             ),
             title="simple-RAG chat",
         )
     )
 
-    state = ConversationState(summary_every=args.summary_every)
+    transcript_log = TranscriptLog()
     show_context = args.show_context
+    session_id = "cli-session"
 
     while True:
         try:
@@ -270,19 +282,12 @@ def main(argv: Sequence[str] | None = None) -> None:
             if command in {"exit", "quit"}:
                 break
             if command == "help":
-                console.print(
-                    "Commands: /help, /exit, /reset, /summary, /showctx (toggle context display)"
-                )
+                console.print("Commands: /help, /exit, /reset, /showctx (toggle context display)")
                 continue
             if command == "reset":
-                state.reset()
+                history_adapter.clear()
+                transcript_log.reset()
                 console.print("[green]Cleared conversation history.[/green]")
-                continue
-            if command == "summary":
-                if state.summary:
-                    console.print(Panel(state.summary, title="Conversation summary", style="magenta"))
-                else:
-                    console.print("[yellow]No summary generated yet.[/yellow]")
                 continue
             if command == "showctx":
                 show_context = not show_context
@@ -293,52 +298,28 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         results = retrieve_contexts(store, user_message, args.retrieval_k)
         context_blocks = format_contexts(results)
-        state.add_user_turn(user_message, context_blocks)
+        transcript_log.add_user_context(context_blocks)
 
         if show_context:
             render_context_table(results, console)
 
-        question_payload = build_question_payload(user_message, state)
         try:
-            messages = compose_messages(question_payload, results, system_prompt=args.system_prompt)
-            answer, raw_response, _ = call_chat_model(
-                messages=messages,
-                provider=provider,
-                model_name=args.llm_model,
-                api_key=api_key,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
-                base_url=args.base_url,
+            user_payload = compose_user_prompt(user_message, results)
+            answer = chat_with_history.invoke(
+                {
+                    "system_prompt": args.system_prompt,
+                    "user_message": user_payload,
+                },
+                config={"configurable": {"session_id": session_id}},
             )
-        except MissingAPIKeyError:
-            console.print(
-                "[red]No API key available during response generation. "
-                "Set --api-key or configure OPENAI_API_KEY/RAG_LLM_API_KEY.[/red]"
-            )
-            sys.exit(1)
-        except (LLMInvocationError, RuntimeError) as exc:
+        except Exception as exc:
             console.print(f"[red]LLM call failed: {exc}[/red]")
             sys.exit(1)
 
-        state.add_assistant_turn(answer)
         console.print(Panel(answer, title="Assistant", style="green"))
 
-        if state.needs_summary():
-            summary_text = summarise_history(
-                state,
-                console,
-                provider=provider,
-                model_name=args.llm_model,
-                api_key=api_key,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
-                base_url=args.base_url,
-            )
-            state.mark_summarised(summary_text)
-            console.print(Panel(summary_text, title="Updated summary", style="magenta"))
-
     if args.transcript_path:
-        save_transcript(state, Path(args.transcript_path), console)
+        save_transcript(memory, transcript_log, Path(args.transcript_path), console)
 
 
 if __name__ == "__main__":
