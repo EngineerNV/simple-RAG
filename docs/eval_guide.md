@@ -2,14 +2,16 @@
 
 This guide explains how to capture human feedback with `scripts/03_quiz.py`,
 understand the saved JSONL/CSV fields, and turn the lightweight report from
-`scripts/report.py` into concrete retrieval or prompting changes.
+`scripts/report.py` into concrete retrieval or prompting changes. The commands
+below reflect the current CLI options exposed by the repository.
 
 ## 1. Prepare Your Corpus and Prompts
 
 1. Add your markdown sources under `data/corpus/` (e.g., `data/corpus/manual.md`).
-2. Build the index once the corpus looks right:
+2. Build the index once the corpus looks right (the script always refreshes the
+   collection):
    ```bash
-   python scripts/01_build_index.py --chunk-size 1200 --chunk-overlap 200
+   python scripts/01_build_index.py
    ```
 3. Create a questions file such as `data/questions/dev.json` containing objects
    with `id` and `question` keys:
@@ -119,9 +121,9 @@ Use the built-in tag recommendations as a checklist:
 
 1. Adjust the pipeline (retrieval settings, prompt, corpus) based on the top
    tags.
-2. Rebuild the index if corpus or chunking changed:
+2. Rebuild the index if corpus content changes:
    ```bash
-   python scripts/01_build_index.py --chunk-size 1500 --chunk-overlap 250
+   python scripts/01_build_index.py
    ```
 3. Re-run the quiz on the same question set (use `--resume` to append or drop
    the previous JSONL for a fresh run).

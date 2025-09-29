@@ -1,27 +1,10 @@
 """01_build_index.py — embed the corpus and persist it to Chroma.
 
-Teacher briefing
------------------
-By the end of this milestone you should have a reproducible script that transforms
-the ingested ``Document`` objects into a Chroma collection. Every later step in
-the lab assumes this store exists, so focus on correctness and repeatability.
-
-Implementation checklist
-------------------------
-1. Import ``ingest`` from ``scripts`` (the helper is re-exported from ``00_ingest``).
-2. Choose an embedding model from LangChain (``HuggingFaceEmbeddings`` works offline;
-   ``OpenAIEmbeddings`` is an option if you have an API key).
-3. Create or connect to a Chroma collection persisted under ``data/chroma/`` using
-   the same embedding function you will use during retrieval.
-4. Add the documents and confirm their metadata is preserved.
-5. Print a concise run report (documents embedded, collection name, persistence dir,
-   and whether the call rebuilt an existing store).
-
-Stretch goals
--------------
-- Accept CLI flags for ``--collection-name``, ``--force`` rebuilds, and embedding choice.
-- Log simple timing stats to highlight slow stages.
-- Optionally serialize the chunk list to JSON for debugging or unit tests.
+This module reuses :func:`scripts.ingest` to load markdown chunks, embeds them
+with a Hugging Face sentence transformer, and writes a fresh Chroma collection
+to ``data/chroma`` on every run. A short summary is printed so you can confirm
+the number of chunks, collection name, and metadata coverage before moving on
+to the retrieval step.
 """
 
 from __future__ import annotations

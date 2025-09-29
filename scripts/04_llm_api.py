@@ -1,29 +1,9 @@
-"""04_llm_api.py — format prompts and execute LLM calls for the LangChain agent.
+"""04_llm_api.py — format prompts and execute LLM calls for quick smoke tests.
 
-Teacher briefing
------------------
-This helper consolidates the glue required for milestone 2's agent and milestone 3's
-prompt design. It loads API credentials, instantiates a chat client, assembles a
-prompt from question + retrieved context, and executes the call while collecting
-metadata you can surface in reports.
-
-Implementation checklist
-------------------------
-1. Read the API key from ``RAG_LLM_API_KEY`` (or a CLI-specified override) and raise
-   a helpful error if it is missing.
-2. Instantiate the provider's chat model (``ChatOpenAI``, ``ChatAnthropic``, etc.) in a
-   dedicated helper so other scripts can reuse it.
-3. Build a prompt template that combines system instructions, the user's question, and
-   retrieved chunks. Return either a formatted string or a sequence of messages.
-4. Call the model, capture response text plus metadata (model, token usage, latency).
-5. Provide a CLI entry point that accepts a question and JSON/markdown context list for
-   quick manual smoke tests.
-
-Stretch goals
--------------
-- Implement retry/backoff handling for rate limits.
-- Support streaming output for interactive demos.
-- Offer multiple prompt templates (concise vs. verbose) toggled by CLI flags.
+This utility loads API credentials, constructs an OpenAI-compatible chat client,
+assembles a prompt from a question plus optional context snippets, and prints the
+model response along with latency and token usage. It is useful for validating
+provider access before wiring the call into other scripts.
 """
 
 from __future__ import annotations

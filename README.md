@@ -1,129 +1,102 @@
 # simple-RAG — Retrieval-Augmented Generation Lab
 
-This workspace supplies a focused homework-style assignment on building a LangChain-powered RAG agent. You receive a working ingestion baseline and progressively design the remaining stages: embedding to Chroma, retrieval + agent routing, LLM prompting, and lightweight evaluation. Each script keeps the same numbering convention (`00`–`04`) so you can run them directly while you implement.
+`simple-RAG` is a teaching project that ships a minimal but runnable retrieval pipeline built with LangChain and Chroma. The repository now includes working ingestion, indexing, retrieval, evaluation, and LLM helper scripts so you can focus on experimenting rather than scaffolding.
 
-## Learning objectives
+## Quick start
 
-- Translate raw markdown documents into LangChain `Document` objects that downstream tooling can consume.
-- Persist embeddings to a local Chroma collection and reuse the same model for retrieval.
-- Orchestrate a LangChain agent that calls into the Chroma retriever and a chat model to answer questions.
-- Capture quick evaluation signals (faithfulness and abstention) to understand when the pipeline is trustworthy.
+1. **Create a virtual environment** and install dependencies:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements-min.txt  # or requirements.txt for the full stack
+   ```
+2. **Configure secrets:** copy `.env.example` to `.env` and populate API keys (`OPENAI_API_KEY` for `02_query.py`, `RAG_LLM_API_KEY` for `04_llm_api.py`).
+3. **Add source material:** drop markdown files into `data/corpus/` (the `corpus/` and `chroma/` directories are created for you).
+4. **Run the pipeline:**
+   ```bash
+   python scripts/00_ingest.py            # inspect chunking
+   python scripts/01_build_index.py       # embed & persist to data/chroma/
+   python scripts/02_query.py -q "What is the pipeline?" --agent-mode pretend
+   ```
 
-## Assignment setup
+The query script offers three modes:
 
-1. Create and activate a Python virtual environment.
-2. Install the dependencies with `pip install -r requirements.txt`.
-3. Copy `.env.example` to `.env` and populate provider keys. The LLM hook expects `RAG_LLM_API_KEY` but you may rename it.
-4. Place one or more markdown files in `data/corpus/`.
-5. Run `python scripts/00_ingest.py` once to verify the corpus is discovered and chunked.
+| Mode      | Description                                                                                          |
+|-----------|------------------------------------------------------------------------------------------------------|
+| `none`    | Retrieve contexts and print a stitched answer using retrieved text only (no LLM call).              |
+| `pretend` | Preview the system prompt, retrieved snippets, and a templated final answer with citations.         |
+| `llm`     | Call a live chat model (OpenAI-compatible) using the retrieved contexts as evidence.                |
 
-## Baseline provided
+## Project structure
 
-- **`scripts/00_ingest.py`** – functional ingestion utility that splits markdown documents into header-aware LangChain `Document` objects.
-- **`scripts/01_build_index.py`** – checklist for embedding and persisting chunks with Chroma.
-- **`scripts/02_query.py`** – checklist for composing a LangChain agent that talks to the vector store and an LLM.
-- **`scripts/03_eval.py`** – checklist for evaluating groundedness and abstention heuristics.
-- **`scripts/04_llm_api.py`** – helper for formatting prompts and executing raw LLM calls.
-- **`configs/`** – placeholder YAML settings you can extend.
-- **`requirements.txt`** – dependency list aligned with the LangChain + Chroma plan.
-- **`data/`** – staging area for source corpus and persisted vector stores.
+| Path | Purpose |
+|------|---------|
+| `scripts/00_ingest.py` | Loads markdown files from `data/corpus/`, splits them by headers, and previews the resulting `Document` chunks. |
+| `scripts/01_build_index.py` | Embeds the ingested chunks with `HuggingFaceEmbeddings`, rebuilds `data/chroma/`, and prints a build summary. |
+| `scripts/02_query.py` | Connects to the persisted Chroma store and exposes the retrieval CLI described above. |
+| `scripts/03_eval.py` | Scores saved question/answer/context rows with lexical heuristics and prints aggregate metrics. |
+| `scripts/03_quiz.py` | Interactive reviewer loop for collecting human judgements (faithful/abstain/tags). |
+| `scripts/04_llm_api.py` | Standalone helper for formatting prompts and calling a chat model with optional context snippets. |
+| `scripts/05_chat_cli.py` | Thin chat loop that wires the retrieval utilities into an interactive CLI. |
+| `scripts/report.py` | Aggregates quiz results into a Markdown summary. |
+| `configs/` | Starter YAML files for prompts and retrieval parameters—update as you extend the project. |
+| `data/` | Storage root. `corpus/` holds your source files; `chroma/` stores the persisted vector index. |
 
-## Milestones
+## Running the CLI tools
 
-### Milestone 0 – Inspect the ingestion baseline (`scripts/00_ingest.py`)
-
-- Execute `python scripts/00_ingest.py` and note how documents are chunked and which metadata fields are preserved.
-- Decide whether additional cleaning is required (stopword removal, metadata enrichment, etc.). Keep the public `ingest()` contract stable so other steps import it.
-
-### Milestone 1 – Build the vector index (`scripts/01_build_index.py`)
-
-Teacher expectations:
-
-- Import `ingest` from `scripts` (re-exported from `00_ingest`) to obtain the `Document` list.
-- Instantiate an embedding model from LangChain (for example `HuggingFaceEmbeddings` or `OpenAIEmbeddings`) and use it consistently across retrieval.
-- Create or connect to a persisted Chroma collection in `data/chroma/` using `langchain_community.vectorstores.Chroma`.
-- Add the documents, confirm they are written to disk, and print a short summary (chunk count, collection name, persistence directory).
-- Provide an optional CLI flag (e.g., `--force`) to rebuild the store from scratch.
-
-### Milestone 2 – Wire a retrieval-aware agent (`scripts/02_query.py`)
-
-Teacher expectations:
-
-- Load the same embedding model and wrap the Chroma collection as a retriever.
-- Define a LangChain `Tool` that exposes the retriever and register it with an agent (ReAct, ConversationalRetrievalChain, or RetrievalQA chain wrapped as a tool).
-- Collect a user question via CLI or function arguments, invoke the agent, and display both the retrieved context snippets and the final answer/abstain message.
-- Allow configuration of retrieval depth (`k`) and model choice via CLI arguments or environment variables.
-
-### Milestone 3 – Shape the LLM call (`scripts/04_llm_api.py`)
-
-Teacher expectations:
-
-- Load API credentials from the environment, instantiate your chosen chat/completions client, and keep client creation in a helper.
-- Build a prompt template that threads system guidance, the question, and retrieved context chunks.
-- Execute the LLM call, capture metadata (model, latency, token usage), and expose a CLI hook for manual smoke tests.
-
-### Milestone 4 – Evaluate groundedness (`scripts/03_eval.py`)
-
-Teacher expectations:
-
-- Curate a small evaluation file (JSON or CSV) with question/answer/context entries produced by your agent.
-- Implement `is_faithful` and `should_abstain` heuristics (keyword overlap, citation presence, or LLM-based checks) and summarise pass/fail counts.
-- Optionally persist detailed reports for later iteration.
-
-## Deliverables
-
-- Implemented scripts for milestones 1–4 that are runnable via `python scripts/<step>.py`.
-- A transcript demonstrating the agent retrieving context and answering (or abstaining) for at least one query.
-- A smoke test of the standalone LLM helper that proves the API integration works (or gracefully abstains without a key).
-- An evaluation summary that highlights faithful vs. unfaithful answers and abstention decisions.
-- Reflection notes on next steps you would explore (model swaps, richer tools, UI ideas, etc.).
-
-## Working notes
-
-- Re-run ingestion whenever the corpus changes; rebuild embeddings if you swap models.
-- Keep secrets in `.env` and never commit the file.
-- Remove `data/chroma/` to force a clean index rebuild during experiments.
-- Use `configs/` to capture tunable parameters once you move beyond the defaults.
-
-## Disk & package size (important for learners)
-
-Some dependencies used for local model inference are large (hundreds of MB to multiple GB). Typical sources of disk usage:
-
-- PyTorch GPU-enabled builds (CUDA) or conda `cudatoolkit` — can add several hundred MB to 1+ GB.
-- Transformers / sentence-transformers and downloaded model weights — each model can be hundreds of MB (check `~/.cache/huggingface`).
-- `unstructured[local-inference]` or other `[...]` extras — pull many native libraries and increase install size.
-- Pip and Conda caches (`~/.cache/pip`, conda package cache) keep downloaded packages unless you clear them.
-
-If you want a minimal development environment (no local ML models), use `requirements-min.txt` which contains only the essentials for experimenting with the pipeline and calling cloud LLM/embedding providers:
+Most scripts are executable with sensible defaults. Highlights:
 
 ```bash
-pip install -r requirements-min.txt
+# 1. Build the vector store (rebuilds data/chroma/ each run)
+python scripts/01_build_index.py
+
+# 2. Ask a question using retrieval only
+python scripts/02_query.py -q "What data directory should I use?"
+
+# 3. Preview how a live LLM call would look without hitting the API
+python scripts/02_query.py -q "Summarise the ingestion step" --agent-mode pretend --k 5
+
+# 4. Call the real LLM once OPENAI_API_KEY is set
+python scripts/02_query.py -q "How do I rebuild the index?" --agent-mode llm --show-usage
+
+# 5. Score an evaluation dataset produced from the quiz or custom tooling
+python scripts/03_eval.py --in data/eval/sample.json --out reports/sample_eval.json
+
+# 6. Smoke-test your API integration with hand-crafted snippets
+python scripts/04_llm_api.py --question "How does retrieval work?" \
+  --context "The retriever uses Chroma with MiniLM embeddings."
 ```
 
-If you plan to run models locally on GPU, expect to allocate extra disk space for PyTorch + CUDA and for any model weights you download. If disk is limited, consider using CPU-only wheels or cloud-hosted embeddings/LLMs instead.
+Each CLI includes `--help` for a full list of options, including custom embedding names, output paths, and evaluation controls.
 
-To free space after experiments:
+## Data directory layout
+
+The repository ships empty placeholders for the directories referenced in the docs:
+
+```
+data/
+├── chroma/   # persisted Chroma collections created by 01_build_index.py
+├── corpus/   # drop your markdown or text sources here
+└── README.md
+```
+
+You can safely delete `data/chroma/` to force a rebuild or replace the files under `data/corpus/` between experiments. Only commit anonymised or shareable content.
+
+## Dependency notes
+
+- `requirements-min.txt` keeps installation lean for remote LLM usage.
+- `requirements-cpu.txt` adds local embedding support without GPU-specific wheels.
+- `requirements.txt` includes optional extras for richer experiments.
+
+Large language model tooling downloads sizeable model weights. Clear caches when needed:
 
 ```bash
-# remove pip cache
-rm -rf ~/.cache/pip
-# remove Hugging Face model cache
-rm -rf ~/.cache/huggingface
-### CPU-only install (smaller)
+rm -rf ~/.cache/pip ~/.cache/huggingface
 ```
 
---------------------------------
-If you want to run local embeddings but avoid GPU/CUDA wheels, install a CPU-only PyTorch before installing the CPU requirements file. Example (verify the correct wheel on <https://pytorch.org/get-started/locally/> for your Python version):
+## Additional resources
 
-```bash
-# create and activate venv
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-# CPU-only torch (example index for CPU wheels)
-pip install --index-url https://download.pytorch.org/whl/cpu/ torch
-# then install the CPU-friendly requirements
-pip install -r requirements-cpu.txt
-```
+- `docs/eval_guide.md` – step-by-step walkthrough of the quiz + report workflow for human evaluation.
+- `Agent.MD` – implementation tips for contributors and automation agents.
 
-`requirements-cpu.txt` includes `sentence-transformers` and `transformers` so you can embed locally without GPU-specific dependencies. Note that model weights are still downloaded to `~/.cache/huggingface` and can be large; pick compact models such as `sentence-transformers/all-MiniLM-L6-v2` to keep disk usage low.
+Happy building!

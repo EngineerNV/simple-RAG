@@ -1,57 +1,53 @@
 # Agent Guide for `simple-RAG`
 
-This document orients automation agents and contributors to the layout, intent, and current state of the repository. Use it as a quick reference before making changes.
+Welcome! This guide summarises the current behaviour of the repository so you
+can ship focused changes without digging through every file. Instructions apply
+to the whole repo (there are no nested `AGENTS.md` files).
 
-## 1. Purpose & High-Level Flow
-- **Goal:** Provide a minimal Retrieval-Augmented Generation (RAG) learning sandbox.
-- **Pipeline order:**
-  1. `scripts/00_ingest.py` – loads markdown-like documents, splits them into header-based sections, and returns `Document` objects from LangChain.
-  2. `scripts/01_build_index.py` – scaffold only. Intended to embed chunks (e.g., Hugging Face or OpenAI) and persist them to Chroma under `data/chroma/`.
-  3. `scripts/02_query.py` – scaffold only. Should embed a user query, retrieve similar chunks from Chroma, and optionally call an LLM.
-  4. `scripts/03_eval.py` – scaffold only. Should evaluate answer faithfulness/abstention heuristics.
+## 1. Current pipeline
 
-Only the ingest step is implemented; later steps are intentionally left as exercises with detailed guidance comments.
+The numbered scripts under `scripts/` are fully implemented and runnable:
 
-## 2. Repository Structure Overview
-| Path | Role |
-| ---- | ---- |
-| `configs/` | YAML templates for RAG settings (`rag.yaml`) and prompt engineering (`prompts.yaml`). Designed for experimentation; values are placeholders. |
-| `data/` | Storage root. Expect `corpus/` for raw docs and `chroma/` for persisted vector DB. Currently contains only `README.md`. |
-| `scripts/` | Sequential pipeline scripts (`00`–`03`). Later stages still contain TODOs scaffolding. |
-| `requirements.txt` | Suggested Python dependencies (LangChain, ChromaDB, transformers, OpenAI/Anthropic, etc.). |
-| `README.md` | Learner-facing overview mirroring much of this guide. |
+1. `00_ingest.py` – loads markdown from `data/corpus/`, splits by headers, and
+   prints a preview of the resulting LangChain `Document` chunks.
+2. `01_build_index.py` – embeds the chunks with MiniLM via
+   `HuggingFaceEmbeddings`, replaces `data/chroma/`, and prints a build summary
+   (doc count, collection name, metadata keys).
+3. `02_query.py` – CLI for retrieval QA. It connects to the persisted Chroma
+   store and supports three modes: `none` (retrieval only), `pretend` (prompt
+   preview + templated answer), and `llm` (OpenAI-compatible chat call).
+4. `03_eval.py` – scores saved question/answer/context rows with lexical
+   heuristics (`is_faithful`, `should_abstain`) and writes optional reports.
+5. `03_quiz.py` / `report.py` – collect human judgements and generate Markdown
+   summaries.
+6. `04_llm_api.py` – standalone smoke test for LLM access (question + context
+   snippets -> formatted prompt -> response + usage metrics).
+7. `05_chat_cli.py` – simple interactive demo using the retrieval helpers.
 
-There are no tests or CI configured yet.
+## 2. Data layout
 
-## 3. Environment & Setup Notes
-- Python project; create a virtual environment and install with `pip install -r requirements.txt`.
-- `.env` handling is implied (see `.env.example` reference in README); ensure secrets such as API keys remain out of version control.
-- LangChain document objects are used in `00_ingest.py`; later steps should reuse the same embeddings model to avoid vector mismatch.
+- `data/corpus/` and `data/chroma/` are committed as empty directories (only
+  `.gitkeep` placeholders). Feel free to drop your own corpus files locally; they
+  are ignored by git.
+- `01_build_index.py` always recreates `data/chroma/`. Delete the folder to force
+  a clean rebuild if you change embeddings.
 
-## 4. Data Handling Expectations
-- Place source documents in `data/corpus/` before running ingestion. Markdown is the only format handled right now; extend the ingestion script if other formats are needed.
-- Chroma persistence path should stay `data/chroma/`. Remove the folder to rebuild from scratch when experimenting.
+## 3. Environment notes
 
-## 5. Working with the Scripts
-- `00_ingest.py` is executable as-is (prints preview of first few sections). It relies on the `langchain_text_splitters` Markdown splitter and reads all non-hidden files within the corpus directory.
-- `01_build_index.py` onwards are stubs with explicit implementation checklists embedded as docstrings. Follow those notes when adding functionality.
-- None of the scaffolded scripts currently persist intermediate outputs to disk; plan for your own serialization if you need later steps to consume saved data.
+- Use `pip install -r requirements-min.txt` for a lean setup, or `requirements.txt`
+  if you want every optional dependency.
+- Copy `.env.example` to `.env` and set `OPENAI_API_KEY` for `02_query.py --agent-mode llm`
+  or `RAG_LLM_API_KEY` for `04_llm_api.py`.
+- No automated tests exist. Run the CLI scripts directly to smoke test changes.
 
-## 6. Suggested Development Workflow
-1. Populate `data/corpus/` with markdown files.
-2. Run `python scripts/00_ingest.py` to validate splitting.
-3. Implement embedding/index logic in `01_build_index.py` (recommended: HuggingFace embeddings + LangChain Chroma wrapper) and persist to `data/chroma/`.
-4. Implement query and evaluation scripts iteratively, keeping comments that explain learning takeaways.
-5. Document any new configuration keys inside the YAML files so other agents understand expected parameters.
+## 4. Contribution guidelines
 
-## 7. Quality & Testing Guidance
-- No automated tests exist. If you add substantive functionality, consider lightweight CLI smoke tests or unit tests.
-- When modifying scripts, ensure they remain runnable as standalone entry points (`python scripts/<name>.py`).
-- Follow standard Python formatting (PEP 8) and avoid wrapping imports in try/except unless truly necessary.
-
-## 8. Contribution Etiquette for Agents
-- Keep commits focused and descriptive; align with the educational tone of existing comments.
-- Update this `Agent.MD` if you significantly change project structure or workflows.
-- Respect repository secrets hygiene and do not commit generated vector data or large corpora unless required.
+- Preserve the educational tone of docstrings and comments when editing code.
+- Update documentation (including this file and `README.md`) when workflow steps
+  change.
+- Do not commit large corpora or vector stores; keep `data/corpus/` and
+  `data/chroma/` empty in git.
+- Follow standard Python style (PEP 8); avoid wrapping imports in `try/except`
+  unless they are optional dependencies.
 
 Happy building!

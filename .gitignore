@@ -40,3 +40,6 @@ pip-wheel-metadata/
 data/chunks/
 data/corpus/*
 !data/corpus/README.md
+!data/corpus/.gitkeep
+data/chroma/*
+!data/chroma/.gitkeep
