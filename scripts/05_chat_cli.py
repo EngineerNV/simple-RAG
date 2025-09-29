@@ -170,16 +170,6 @@ def build_question_payload(user_message: str, state: ConversationState) -> str:
     return "\n\n".join(sections)
 
 
-def generate_mock_answer(question: str, contexts: Sequence[str]) -> str:
-    if not contexts:
-        return "I don't have enough information to answer that yet."
-    joined = " \n".join(contexts)
-    return (
-        "(offline mode) Here's what I found from the knowledge base:\n"
-        + textwrap.fill(joined, width=80)
-    )
-
-
 def summarise_history(state: ConversationState, console: Console, provider: str, model_name: str,
                       api_key: str | None, temperature: float, max_tokens: int, base_url: str | None) -> str:
     transcript = state.transcript_text()
@@ -245,6 +235,12 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     api_key = resolve_api_key(args.api_key)
     provider = args.provider
+
+    if not api_key:
+        console.print(
+            "[red]No API key available. Set --api-key or the OPENAI_API_KEY/RAG_LLM_API_KEY environment variable.[/red]"
+        )
+        sys.exit(1)
 
     console.print(
         Panel(
@@ -315,13 +311,14 @@ def main(argv: Sequence[str] | None = None) -> None:
                 base_url=args.base_url,
             )
         except MissingAPIKeyError:
-            console.print("[yellow]No API key configured. Using offline synthesis.")
-            answer = generate_mock_answer(question_payload, context_blocks)
-            raw_response = None
+            console.print(
+                "[red]No API key available during response generation. "
+                "Set --api-key or configure OPENAI_API_KEY/RAG_LLM_API_KEY.[/red]"
+            )
+            sys.exit(1)
         except (LLMInvocationError, RuntimeError) as exc:
-            console.print(f"[yellow]LLM call failed ({exc}). Switching to offline synthesis.")
-            answer = generate_mock_answer(question_payload, context_blocks)
-            raw_response = None
+            console.print(f"[red]LLM call failed: {exc}[/red]")
+            sys.exit(1)
 
         state.add_assistant_turn(answer)
         console.print(Panel(answer, title="Assistant", style="green"))
