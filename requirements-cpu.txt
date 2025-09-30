@@ -1,6 +1,6 @@
 # Minimal CPU-only development requirements for simple-RAG
 langchain
-chromadb
+chromadb==0.6.3
 python-dotenv
 pydantic
 rich

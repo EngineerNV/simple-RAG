@@ -3,7 +3,7 @@ langchain
 langchain-core
 langchain-community
 langchain-text-splitters
-chromadb
+chromadb==0.6.3
 python-dotenv
 pydantic
 rich
