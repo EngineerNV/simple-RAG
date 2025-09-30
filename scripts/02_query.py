@@ -350,7 +350,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-key", dest="api_key", help="API key for the chosen provider (defaults to environment)")
     parser.add_argument("--base-url", dest="base_url", help="Optional base URL for OpenAI-compatible endpoints")
     parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature for the chat model")
-    parser.add_argument("--max-tokens", type=int, default=700, help="Maximum tokens for the chat model response")
+    parser.add_argument("--max-tokens", type=int, default=2000, help="Maximum tokens for the chat model response")
     parser.add_argument(
         "--show-usage",
         action="store_true",
