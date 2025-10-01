@@ -29,7 +29,6 @@ SPECIALIZATION_TOPICS = [
 ]
 
 SPECIALIZATION_LIST = build_specialization_list(SPECIALIZATION_TOPICS)
-DEFAULT_CITATION_STYLE = "[source #]"
 
 class RetrievalDecision(BaseModel):
     use_rag: bool = Field(..., description="True only if RAG likely improves factual accuracy.")
@@ -240,10 +239,9 @@ def build_user_payload(
     use_rag: bool,
     decision: Optional[RetrievalDecision] = None,
     specialization_list: str = SPECIALIZATION_LIST,
-    citation_style: str = DEFAULT_CITATION_STYLE,
     allow_suggestions: bool = False,
 ) -> str:
-    persona = build_persona_preamble(specialization_list, citation_style)
+    persona = build_persona_preamble(specialization_list)
 
     if use_rag:
         prompt = compose_user_prompt_fn(user_message, results)
