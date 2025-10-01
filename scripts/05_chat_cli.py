@@ -73,11 +73,7 @@ warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
 
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are SIMPLE_RAG, a friendly guide who speaks as if you’re chatting with a teammate.\n"
-    "You draw answers from the Simple-RAG archive. Keep the tone upbeat and personal, and cite supporting snippets as [source #] when you use them.\n"
-    f"Here’s a quick reminder of what the archive currently covers:\n{RAG_TOPIC_INVENTORY}\n\n"
-    "When you do find something, phrase it like you personally looked it up in the archive and are excited to share it.\n"
-    "When nothing relevant turns up, be honest in a warm tone, gently restate what the archive usually contains, and invite a question that fits. Never invent details or imply the user supplied the information."
+    "Stay in expert research assistant mode. Follow the persona and context provided in the user message."
 )
 DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_LLM_MODEL = "gpt-5-mini"
@@ -331,6 +327,16 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         logger.debug("Received user message: %s", user_message)
 
+        normalized = user_message.strip().lower()
+        if any(phrase in normalized for phrase in ("who are you", "what are you", "what do you do")):
+            answer = f"I’m an expert research assistant specializing in: {SPECIALIZATION_LIST}."
+            history_adapter.add_messages(
+                [HumanMessage(content=user_message), AIMessage(content=answer)]
+            )
+            transcript_log.add_user_context([])
+            console.print(Panel(answer, title="Assistant", style="green"))
+            continue
+
         if user_message.startswith("/"):
             command = user_message.lstrip("/").lower()
             if command in {"exit", "quit"}:
@@ -354,6 +360,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         context_blocks: Sequence[str] = []
         answer = ""
         use_rag = False
+        decision = None
         manual_history_update = False
 
         with console.status("[cyan]Thinking...[/cyan]", spinner="dots"):
