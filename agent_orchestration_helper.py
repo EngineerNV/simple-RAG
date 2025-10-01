@@ -9,6 +9,8 @@ try:
 except Exception:
     BaseMessage = Any  # type: ignore
 
+from utils.inventory_view import build_specialization_list
+
 RAG_TOPIC_INVENTORY: str = """
 RAG covers:
 - Kanto region field notes for Generation I Pokémon (focus on Pikachu)
@@ -16,6 +18,15 @@ RAG covers:
 - Trainer tips, battle tactics, evolutionary paths, item interactions
 - No real-time events; canonical up to the Indigo League era (circa 1998)
 """.strip()
+
+SPECIALIZATION_TOPICS = [
+    "Generation I Pokémon field research across the Kanto region",
+    "Species bios, habitats, abilities, typings, base stats, and movesets",
+    "Trainer strategies, battle tactics, evolutionary paths, and item interactions",
+    "Lore through the Indigo League era (circa 1998)",
+]
+
+SPECIALIZATION_LIST = build_specialization_list(SPECIALIZATION_TOPICS)
 
 class RetrievalDecision(BaseModel):
     use_rag: bool = Field(..., description="True only if RAG likely improves factual accuracy.")

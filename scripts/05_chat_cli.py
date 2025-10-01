@@ -45,11 +45,18 @@ from langchain_core._api.deprecation import LangChainDeprecationWarning
 
 from agent_orchestration_helper import (
     RAG_TOPIC_INVENTORY,
+    SPECIALIZATION_LIST,
     build_decider,
     decide_use_rag,
     build_rewriter,
     apply_rewrite_and_retrieve,
     build_user_payload,
+)
+from utils import (
+    build_rejection_writer,
+    build_topic_guard,
+    generate_rejection,
+    topic_gate,
 )
 
 query_module = import_module("scripts.02_query")
@@ -262,8 +269,16 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     decider_llm = build_decider(llm)
     rewriter_llm = build_rewriter(llm)
+    topic_guard_llm = build_topic_guard(llm)
+    rejection_llm = build_rejection_writer(llm)
 
-    logger.debug("LLM loaded; structured helpers ready (decider=%s, rewriter=%s).", type(decider_llm).__name__, type(rewriter_llm).__name__)
+    logger.debug(
+        "LLM loaded; structured helpers ready (decider=%s, rewriter=%s, topic_guard=%s, rejection_writer=%s).",
+        type(decider_llm).__name__,
+        type(rewriter_llm).__name__,
+        type(topic_guard_llm).__name__,
+        type(rejection_llm).__name__,
+    )
 
     memory = ConversationSummaryBufferMemory(
         llm=llm,
@@ -339,66 +354,89 @@ def main(argv: Sequence[str] | None = None) -> None:
         context_blocks: Sequence[str] = []
         answer = ""
         use_rag = False
+        manual_history_update = False
 
         with console.status("[cyan]Thinking...[/cyan]", spinner="dots"):
-            decision = decide_use_rag(
-                decider_llm=decider_llm,
-                history_adapter=history_adapter,
+            gate_decision = topic_gate(
+                guard_llm=topic_guard_llm,
                 user_message=user_message,
-                rag_topics=RAG_TOPIC_INVENTORY,
-                memory=history_adapter.memory,
-                min_conf=0.70,
+                specialization_list=SPECIALIZATION_LIST,
             )
-            use_rag = decision.use_rag
+            gate_payload = gate_decision.model_dump() if hasattr(gate_decision, "model_dump") else gate_decision.dict()
+            logger.debug("Topic gate verdict: %s", gate_payload)
 
-            decision_payload = decision.model_dump() if hasattr(decision, "model_dump") else decision.dict()
-            logger.debug("Decider verdict: %s", decision_payload)
-
-            if use_rag:
-                rewrite, results = apply_rewrite_and_retrieve(
-                    rewriter_llm=rewriter_llm,
-                    retrieve_contexts_fn=retrieve_contexts,
-                    store=store,
+            if not gate_decision.on_topic:
+                answer = generate_rejection(
+                    llm=rejection_llm,
+                    specialization_list=SPECIALIZATION_LIST,
                     user_message=user_message,
-                    history_adapter=history_adapter,
-                    rag_topics=RAG_TOPIC_INVENTORY,
-                    k=args.retrieval_k,
-                    use_namespace_filter=False,
                 )
-                rewrite_payload = rewrite.model_dump() if hasattr(rewrite, "model_dump") else rewrite.dict()
-                logger.debug("Query rewrite produced: %s", rewrite_payload)
-                logger.debug(
-                    "Retrieved %d context chunks via rewritten query '%s'.",
-                    len(results),
-                    rewrite.query or user_message,
-                )
-                context_blocks = format_contexts(results)
+                logger.debug("Off-topic gate triggered (reason: %s).", gate_decision.reason)
+                manual_history_update = True
             else:
-                results = []
-                context_blocks = []
-                logger.debug("RAG skipped for this turn (reason: %s).", decision.reason)
-
-            try:
-                user_payload = build_user_payload(
+                decision = decide_use_rag(
+                    decider_llm=decider_llm,
+                    history_adapter=history_adapter,
                     user_message=user_message,
-                    results=results,
-                    compose_user_prompt_fn=compose_user_prompt,
-                    use_rag=use_rag,
-                    decision=decision,
+                    rag_topics=RAG_TOPIC_INVENTORY,
+                    memory=history_adapter.memory,
+                    min_conf=0.70,
                 )
-                logger.debug("User payload forwarded to LLM (truncated): %s", user_payload[:500])
-                answer = chat_with_history.invoke(
-                    {
-                        "system_prompt": args.system_prompt,
-                        "user_message": user_payload,
-                    },
-                    config={"configurable": {"session_id": session_id}},
-                )
-                logger.debug("LLM output (truncated): %s", answer[:500])
-            except Exception as exc:
-                logger.exception("LLM call failed.")
-                console.print(f"[red]LLM call failed: {exc}[/red]")
-                sys.exit(1)
+                use_rag = decision.use_rag
+
+                decision_payload = decision.model_dump() if hasattr(decision, "model_dump") else decision.dict()
+                logger.debug("Decider verdict: %s", decision_payload)
+
+                if use_rag:
+                    rewrite, results = apply_rewrite_and_retrieve(
+                        rewriter_llm=rewriter_llm,
+                        retrieve_contexts_fn=retrieve_contexts,
+                        store=store,
+                        user_message=user_message,
+                        history_adapter=history_adapter,
+                        rag_topics=RAG_TOPIC_INVENTORY,
+                        k=args.retrieval_k,
+                        use_namespace_filter=False,
+                    )
+                    rewrite_payload = rewrite.model_dump() if hasattr(rewrite, "model_dump") else rewrite.dict()
+                    logger.debug("Query rewrite produced: %s", rewrite_payload)
+                    logger.debug(
+                        "Retrieved %d context chunks via rewritten query '%s'.",
+                        len(results),
+                        rewrite.query or user_message,
+                    )
+                    context_blocks = format_contexts(results)
+                else:
+                    results = []
+                    context_blocks = []
+                    logger.debug("RAG skipped for this turn (reason: %s).", decision.reason)
+
+                try:
+                    user_payload = build_user_payload(
+                        user_message=user_message,
+                        results=results,
+                        compose_user_prompt_fn=compose_user_prompt,
+                        use_rag=use_rag,
+                        decision=decision,
+                    )
+                    logger.debug("User payload forwarded to LLM (truncated): %s", user_payload[:500])
+                    answer = chat_with_history.invoke(
+                        {
+                            "system_prompt": args.system_prompt,
+                            "user_message": user_payload,
+                        },
+                        config={"configurable": {"session_id": session_id}},
+                    )
+                    logger.debug("LLM output (truncated): %s", answer[:500])
+                except Exception as exc:
+                    logger.exception("LLM call failed.")
+                    console.print(f"[red]LLM call failed: {exc}[/red]")
+                    sys.exit(1)
+
+        if manual_history_update:
+            history_adapter.add_messages(
+                [HumanMessage(content=user_message), AIMessage(content=answer)]
+            )
 
         transcript_log.add_user_context(context_blocks)
         if use_rag and show_context:
