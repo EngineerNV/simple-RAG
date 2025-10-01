@@ -1,13 +1,17 @@
 # agent_orchestration_helper.py — RAG-aware orchestration helpers (no score gate).
 
 from __future__ import annotations
-from typing import Optional, Sequence, Tuple, Any, List, Dict
+from typing import Optional, Sequence, Tuple, Any, List
 from pydantic import BaseModel, Field
 
 try:
     from langchain_core.messages import BaseMessage
 except Exception:
     BaseMessage = Any  # type: ignore
+
+from utils.inventory_view import build_specialization_list
+from utils.persona import build_persona_preamble
+from utils.text_sanitize import validate_output
 
 RAG_TOPIC_INVENTORY: str = """
 RAG covers:
@@ -16,6 +20,15 @@ RAG covers:
 - Trainer tips, battle tactics, evolutionary paths, item interactions
 - No real-time events; canonical up to the Indigo League era (circa 1998)
 """.strip()
+
+SPECIALIZATION_TOPICS = [
+    "Generation I Pokémon field research across the Kanto region",
+    "Species bios, habitats, abilities, typings, base stats, and movesets",
+    "Trainer strategies, battle tactics, evolutionary paths, and item interactions",
+    "Lore through the Indigo League era (circa 1998)",
+]
+
+SPECIALIZATION_LIST = build_specialization_list(SPECIALIZATION_TOPICS)
 
 class RetrievalDecision(BaseModel):
     use_rag: bool = Field(..., description="True only if RAG likely improves factual accuracy.")
@@ -225,25 +238,27 @@ def build_user_payload(
     compose_user_prompt_fn,
     use_rag: bool,
     decision: Optional[RetrievalDecision] = None,
+    specialization_list: str = SPECIALIZATION_LIST,
+    allow_suggestions: bool = False,
 ) -> str:
+    persona = build_persona_preamble(specialization_list)
+
     if use_rag:
         prompt = compose_user_prompt_fn(user_message, results)
-        prompt += (
-            "\n\nAssistant directive: Share these findings as something you just pulled from the Simple-RAG archive, keep the tone upbeat, and cite snippets as [source #] in a natural sentence."
-        )
-        return prompt
-    overlaps_topics = bool(decision and decision.overlaps_rag_topics)
+        return validate_output(persona + "\n" + prompt, allow_suggestions)
+
+    overlaps_topics = bool(decision and getattr(decision, "overlaps_rag_topics", False))
     if overlaps_topics:
-        return (
-            "No archive notes matched this question, but it’s still on theme."
-            " Offer a friendly, concise answer using your own background knowledge, make it clear no archive snippets were cited,"
-            " and invite the user to ask for more details if they’d like you to check the archive again."
-            f"\nUser question: {user_message}"
+        prompt = (
+            persona
+            + "\nNo directly matching notes found. Answer concisely from your own knowledge; do not cite.\n"
+            f"User question: {user_message}"
         )
-    return (
-        "Compose a warm, conversational reply letting the user know you couldn’t find anything in the Simple-RAG archive for this question."
-        " Politely remind them what the archive does cover (summarise in one or two friendly sentences) and suggest they ask something in that space."
-        " Avoid sounding scripted or blaming the user—just keep the tone encouraging."
-        f"\nArchive coverage summary:\n{RAG_TOPIC_INVENTORY}\n"
+        return validate_output(prompt, allow_suggestions)
+
+    prompt = (
+        persona
+        + "\nThis appears outside my specialization. Provide a brief refusal—no suggestions—and state the specialization list.\n"
         f"User question: {user_message}"
     )
+    return validate_output(prompt, allow_suggestions)
