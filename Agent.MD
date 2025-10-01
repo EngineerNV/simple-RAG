@@ -22,7 +22,8 @@ The numbered scripts under `scripts/` are fully implemented and runnable:
    summaries.
 6. `04_llm_api.py` – standalone smoke test for LLM access (question + context
    snippets -> formatted prompt -> response + usage metrics).
-7. `05_chat_cli.py` – simple interactive demo using the retrieval helpers.
+7. `05_chat_cli.py` – interactive SIMPLE_RAG chat agent that decides when to call RAG, rewrites queries for cosine search, and presents answers in a friendly persona (spinner included).
+8. `agent_orchestration_helper.py` – shared module for the decider, query rewriter, topic inventory, and fallback payload builder used by the CLI.
 
 ## 2. Data layout
 

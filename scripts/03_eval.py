@@ -298,7 +298,7 @@ def main() -> None:
     parser.add_argument("--provider", default="openai", help="LLM provider identifier")
     parser.add_argument("--api-key", dest="api_key", help="Provider API key (defaults to OPENAI_API_KEY env var)")
     parser.add_argument("--temperature", type=float, default=0.2, help="Chat model temperature")
-    parser.add_argument("--max-tokens", type=int, default=700, help="Chat model max tokens")
+    parser.add_argument("--max-tokens", type=int, default=2000, help="Chat model max tokens")
     parser.add_argument("--base-url", dest="base_url", help="Optional OpenAI-compatible base URL")
     parser.add_argument("--rebuild-index", action="store_true", help="Run scripts/01_build_index.py before evaluation")
     args = parser.parse_args()
@@ -337,4 +337,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

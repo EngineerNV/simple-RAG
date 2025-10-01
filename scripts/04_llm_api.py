@@ -56,7 +56,7 @@ def build_llm_client(
     model_name: str = DEFAULT_MODEL_NAME,
     *,
     temperature: float = 0.2,
-    max_tokens: int = 700,
+    max_tokens: int = 2000,
     base_url: Optional[str] = None,
     provider: str = "openai",
 ) -> BaseChatModel:
@@ -189,7 +189,7 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME, help="Chat model identifier")
     parser.add_argument("--provider", default="openai", help="LLM provider identifier")
     parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature")
-    parser.add_argument("--max-tokens", type=int, default=700, help="Maximum tokens for the response")
+    parser.add_argument("--max-tokens", type=int, default=2000, help="Maximum tokens for the response")
     parser.add_argument("--base-url", dest="base_url", help="Optional custom base URL for OpenAI-compatible APIs")
     args = parser.parse_args()
 

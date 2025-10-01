@@ -37,7 +37,8 @@ The query script offers three modes:
 | `scripts/03_eval.py` | Scores saved question/answer/context rows with lexical heuristics and prints aggregate metrics. |
 | `scripts/03_quiz.py` | Interactive reviewer loop for collecting human judgements (faithful/abstain/tags). |
 | `scripts/04_llm_api.py` | Standalone helper for formatting prompts and calling a chat model with optional context snippets. |
-| `scripts/05_chat_cli.py` | Thin chat loop that wires the retrieval utilities into an interactive CLI. |
+| `scripts/05_chat_cli.py` | SIMPLE_RAG chat experience with RAG decider, query rewriting, persona prompts, and a progress spinner. |
+| `agent_orchestration_helper.py` | Shared helpers for the SIMPLE_RAG CLI (topic inventory, structured decider/rewriter, fallback payload builder). |
 | `scripts/report.py` | Aggregates quiz results into a Markdown summary. |
 | `configs/` | Starter YAML files for prompts and retrieval parameters—update as you extend the project. |
 | `data/` | Storage root. `corpus/` holds your source files; `chroma/` stores the persisted vector index. |
@@ -59,15 +60,26 @@ python scripts/02_query.py -q "Summarise the ingestion step" --agent-mode preten
 # 4. Call the real LLM once OPENAI_API_KEY is set
 python scripts/02_query.py -q "How do I rebuild the index?" --agent-mode llm --show-usage
 
-# 5. Score an evaluation dataset produced from the quiz or custom tooling
+# 5. Chat with the SIMPLE_RAG agent (persona + spinner)
+python scripts/05_chat_cli.py --debug --show-context
+
+# 6. Score an evaluation dataset produced from the quiz or custom tooling
 python scripts/03_eval.py --in data/eval/sample.json --out reports/sample_eval.json
 
-# 6. Smoke-test your API integration with hand-crafted snippets
+# 7. Smoke-test your API integration with hand-crafted snippets
 python scripts/04_llm_api.py --question "How does retrieval work?" \
   --context "The retriever uses Chroma with MiniLM embeddings."
 ```
 
 Each CLI includes `--help` for a full list of options, including custom embedding names, output paths, and evaluation controls.
+
+### Inside the SIMPLE_RAG chat CLI
+
+`scripts/05_chat_cli.py` now behaves like a cheerful teammate rather than a bare pipeline demo:
+
+- **Decide → Rewrite → Retrieve:** every turn runs a structured decider to see whether the question falls within the archive topics, optionally rewrites the query for cosine search, and fetches supporting snippets. A Rich status spinner keeps the user informed while the agent is “thinking.”
+- **Friendly persona:** when contexts exist, SIMPLE_RAG talks about what it just looked up and cites snippets as `[source #]`. If nothing relevant is found but the question is on theme, it gives a short background answer from its own knowledge; truly off-topic prompts are deflected with gentle suggestions that align with the archive.
+- **Shared orchestration helpers:** all of the routing logic, inventory text, and fallbacks live in `agent_orchestration_helper.py`, keeping the CLI tidy and making it easy to reuse the same behaviour elsewhere.
 
 ## Data directory layout
 

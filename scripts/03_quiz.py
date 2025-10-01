@@ -571,7 +571,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-key", dest="api_key", help="API key (defaults to OPENAI_API_KEY)")
     parser.add_argument("--base-url", dest="base_url", help="Optional OpenAI-compatible base URL")
     parser.add_argument("--temperature", type=float, default=0.2, help="LLM sampling temperature")
-    parser.add_argument("--max-tokens", type=int, default=700, help="LLM max tokens")
+    parser.add_argument("--max-tokens", type=int, default=2000, help="LLM max tokens")
     parser.add_argument("--out", default="data/human_review.jsonl", help="Output JSONL path")
     parser.add_argument("--resume", action="store_true", help="Resume from existing output")
     parser.add_argument("--shuffle", action="store_true", help="Shuffle question order")
@@ -654,4 +654,3 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-
