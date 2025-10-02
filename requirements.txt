@@ -18,5 +18,6 @@ transformers
 sentence-transformers
 
 # Cloud LLMs (choose one or both)
+langchain-openai
 openai
 anthropic
