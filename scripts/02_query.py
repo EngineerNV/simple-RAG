@@ -19,8 +19,10 @@ except ImportError:  # pragma: no cover - optional dependency
         return False
 import sys
 import textwrap
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import Callable, List, Sequence, Tuple
 
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
@@ -45,7 +47,7 @@ SYSTEM_PROMPT = (
     "Cite as [source N]."
 )
 
-RetrieverResult = List[Tuple[Document, float]]
+RetrieverResult = List[Tuple[Document, float | None]]
 load_dotenv()
 
 
@@ -55,6 +57,23 @@ class MissingAPIKeyError(RuntimeError):
 
 class LLMInvocationError(RuntimeError):
     """Raised when the underlying LLM client fails to produce a response."""
+
+
+class UnsupportedProviderError(RuntimeError):
+    """Raised when an unknown LLM provider identifier is supplied."""
+
+
+class MissingProviderDependencyError(RuntimeError):
+    """Raised when a provider-specific dependency is unavailable."""
+
+
+@dataclass
+class LLMResult:
+    """Container for the normalized LLM response and metadata."""
+
+    text: str
+    raw_response: object
+    usage: dict | None
 
 def load_vector_store(persist_dir: Path, embedding_model: HuggingFaceEmbeddings) -> Chroma:
     """Connect to the Chroma collection built during the indexing milestone."""
@@ -97,20 +116,34 @@ def retrieve_contexts(store: Chroma, question: str, k: int) -> RetrieverResult:
         try:
             numeric_score = float(score)
         except (TypeError, ValueError):
-            numeric_score = 0.0
+            warnings.warn(
+                "Encountered non-numeric relevance score from retriever; treating as unknown.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            numeric_score = None
         formatted.append((doc, numeric_score))
     return formatted
 
 
-def emit_contexts(results: RetrieverResult, header: str) -> None:
+def emit_contexts(
+    results: RetrieverResult,
+    header: str,
+    *,
+    label_factory: Callable[[int], str] | None = None,
+    limit: int | None = None,
+) -> None:
     print(f"\n{header}")
     if not results:
         print("No contexts retrieved.")
         return
-    for idx, (doc, score) in enumerate(results):
+    label_factory = label_factory or (lambda idx: f"[{idx}]")
+    window = results if limit is None else results[:limit]
+    for idx, (doc, score) in enumerate(window):
         meta_line = format_metadata(getattr(doc, "metadata", {}))
         snippet = clean_snippet(doc.page_content)
-        print(f"[{idx}] score: {score:.3f} | {meta_line}")
+        score_display = f"{score:.3f}" if score is not None else "n/a"
+        print(f"{label_factory(idx)} score: {score_display} | {meta_line}")
         if snippet:
             print(textwrap.fill(snippet, width=120))
         else:
@@ -139,18 +172,12 @@ def run_pretend_mode(question: str, results: RetrieverResult, k: int) -> None:
     print(textwrap.fill(SYSTEM_PROMPT, width=120))
     print("\nUser question:")
     print(textwrap.fill(question, width=120))
-    print("\nRetrieved contexts (top k):")
-    if not results:
-        print("No contexts retrieved.")
-    for idx, (doc, score) in enumerate(results[:k]):
-        meta_line = format_metadata(getattr(doc, "metadata", {}))
-        snippet = clean_snippet(doc.page_content)
-        print(f"[source {idx}] score: {score:.3f} | {meta_line}")
-        if snippet:
-            print(textwrap.fill(snippet, width=120))
-        else:
-            print("(empty snippet)")
-        print("-")
+    emit_contexts(
+        results,
+        "Retrieved contexts (top k):",
+        label_factory=lambda idx: f"[source {idx}]",
+        limit=k,
+    )
     cited = [str(idx) for idx in range(min(k, len(results)))]
     synth = " ".join(
         clean_snippet(doc.page_content) for doc, _ in results[:k]
@@ -173,7 +200,8 @@ def compose_user_prompt(question: str, results: RetrieverResult) -> str:
         for idx, (doc, score) in enumerate(results):
             meta_line = format_metadata(getattr(doc, "metadata", {}))
             snippet = clean_snippet(doc.page_content)
-            lines.append(f"[source {idx}] score: {score:.3f} | {meta_line}")
+            score_display = f"{score:.3f}" if score is not None else "n/a"
+            lines.append(f"[source {idx}] score: {score_display} | {meta_line}")
             lines.append(snippet or "(empty snippet)")
             lines.append("")
     return "\n".join(lines).strip()
@@ -187,7 +215,7 @@ def compose_messages(
     """Create the chat messages for the retrieval-informed LLM call."""
 
     return [
-        SystemMessage(content=system_prompt or SYSTEM_PROMPT),
+        SystemMessage(content=system_prompt if system_prompt is not None else SYSTEM_PROMPT),
         HumanMessage(content=compose_user_prompt(question, results)),
     ]
 
@@ -201,11 +229,11 @@ def load_chat_model(
     base_url: str | None,
 ):
     if provider != "openai":
-        raise RuntimeError(f"Unsupported provider '{provider}'.")
+        raise UnsupportedProviderError(f"Unsupported provider '{provider}'.")
     try:
         from langchain_openai import ChatOpenAI
     except ImportError as exc:  # pragma: no cover - optional dependency
-        raise RuntimeError(
+        raise MissingProviderDependencyError(
             "Missing optional dependency 'langchain-openai'. Install it with `pip install langchain-openai`."
         ) from exc
 
@@ -254,8 +282,8 @@ def call_chat_model(
     temperature: float,
     max_tokens: int,
     base_url: str | None,
-) -> tuple[str, object, dict | None]:
-    """Call the chat model and return (text, raw_response, usage_metadata)."""
+) -> LLMResult:
+    """Call the chat model and return a normalized ``LLMResult``."""
 
     if not api_key:
         raise MissingAPIKeyError("API key is required for live LLM calls.")
@@ -268,14 +296,11 @@ def call_chat_model(
 
     final_text = extract_text_from_response(response)
     usage = extract_usage_metadata(response)
-    return final_text, response, usage
+    return LLMResult(text=final_text, raw_response=response, usage=usage)
 
 
-def print_usage_metadata(response, show_usage: bool) -> None:
-    if not show_usage:
-        return
-    usage = extract_usage_metadata(response)
-    if not usage:
+def print_usage_metadata(usage: dict | None, show_usage: bool) -> None:
+    if not show_usage or not usage:
         return
     print("\nUsage metadata:")
     if isinstance(usage, dict):
@@ -311,7 +336,7 @@ def run_llm_mode(
     emit_contexts(results, "=== Retrieved Evidence ===")
     messages = compose_messages(question, results)
     try:
-        final_text, response, _ = call_chat_model(
+        result = call_chat_model(
             messages=messages,
             provider=provider,
             model_name=model_name,
@@ -324,14 +349,14 @@ def run_llm_mode(
         print("OpenAI API key missing. Falling back to mock answer.", file=sys.stderr)
         print_mock_answer(results)
         return
-    except RuntimeError as exc:
+    except (UnsupportedProviderError, MissingProviderDependencyError, LLMInvocationError) as exc:
         print(str(exc), file=sys.stderr)
         print_mock_answer(results)
         return
 
     print("\n=== Final Answer ===\n")
-    print(final_text or "I don't know.")
-    print_usage_metadata(response, show_usage)
+    print(result.text or "I don't know.")
+    print_usage_metadata(result.usage, show_usage)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
