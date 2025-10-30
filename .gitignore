@@ -41,5 +41,6 @@ data/chunks/
 data/corpus/*
 !data/corpus/README.md
 !data/corpus/.gitkeep
+!data/corpus/Pokémon.MD
 data/chroma/*
 !data/chroma/.gitkeep

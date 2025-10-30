@@ -8,8 +8,9 @@ to the whole repo (there are no nested `AGENTS.md` files).
 
 The numbered scripts under `scripts/` are fully implemented and runnable:
 
-1. `00_ingest.py` – loads markdown from `data/corpus/`, splits by headers, and
-   prints a preview of the resulting LangChain `Document` chunks.
+1. `00_ingest.py` – loads markdown from `data/corpus/`, splits them into
+   token-aware chunks with overlap, and prints a preview of the resulting
+   LangChain `Document` objects.
 2. `01_build_index.py` – embeds the chunks with MiniLM via
    `HuggingFaceEmbeddings`, replaces `data/chroma/`, and prints a build summary
    (doc count, collection name, metadata keys).
