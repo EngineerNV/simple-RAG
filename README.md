@@ -12,6 +12,7 @@
    ```
 2. **Configure secrets:** copy `.env.example` to `.env` and populate API keys (`OPENAI_API_KEY` for `02_query.py`, `RAG_LLM_API_KEY` for `04_llm_api.py`).
 3. **Add source material:** drop markdown files into `data/corpus/` (the `corpus/` and `chroma/` directories are created for you).
+   - A sample knowledge base, `Pokémon.MD`, is included so you can immediately test ingestion and retrieval behaviour.
 4. **Run the pipeline:**
    ```bash
    python scripts/00_ingest.py            # inspect chunking
@@ -31,7 +32,7 @@ The query script offers three modes:
 
 | Path | Purpose |
 |------|---------|
-| `scripts/00_ingest.py` | Loads markdown files from `data/corpus/`, splits them by headers, and previews the resulting `Document` chunks. |
+| `scripts/00_ingest.py` | Loads markdown files from `data/corpus/`, splits them into token-sized chunks with overlap, and previews the resulting `Document` objects. |
 | `scripts/01_build_index.py` | Embeds the ingested chunks with `HuggingFaceEmbeddings`, rebuilds `data/chroma/`, and prints a build summary. |
 | `scripts/02_query.py` | Connects to the persisted Chroma store and exposes the retrieval CLI described above. |
 | `scripts/03_eval.py` | Scores saved question/answer/context rows with lexical heuristics and prints aggregate metrics. |

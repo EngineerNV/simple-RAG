@@ -8,9 +8,9 @@ same chunking strategy before experimenting with embeddings, retrieval, and agen
 What the script already provides
 --------------------------------
 * Reads markdown-like files from ``data/corpus/`` (configurable via ``CORPUS_DIR``).
-* Splits documents into sections keyed by headers (#, ##, ###) using
-  ``MarkdownHeaderTextSplitter``.
-* Returns ``List[Document]`` objects with header metadata intact—ready for embedding.
+* Splits documents into token-budgeted sections with sensible overlap so chunks align
+  with embedding context windows.
+* Returns ``List[Document]`` objects annotated with source metadata ready for embedding.
 
 Learner guidance
 ----------------
@@ -21,15 +21,18 @@ Learner guidance
 """
 
 import os  # Handle filesystem navigation for the corpus directory
-from typing import List  # Describe the list of LangChain Document objects returned
+from typing import Iterable, List  # Describe the list of LangChain Document objects returned
 
-from langchain_text_splitters import (  # Split markdown files into header-aware chunks
-    MarkdownHeaderTextSplitter,
-)
+from langchain_core.documents import Document  # Represent individual text chunks with metadata
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # ---------------------------- Config ----------------------------
 CORPUS_DIR = os.environ.get("CORPUS_DIR", os.path.join("data", "corpus"))
-HEADER_LEVELS = ["#", "##", "###"]  # order matters
+
+# Configure chunking in token units so the ingestion step aligns with embedding models.
+DEFAULT_TIKTOKEN_MODEL = os.environ.get("INGEST_TIKTOKEN_MODEL", "text-embedding-3-small")
+CHUNK_SIZE_TOKENS = int(os.environ.get("INGEST_CHUNK_SIZE", "400"))
+CHUNK_OVERLAP_TOKENS = int(os.environ.get("INGEST_CHUNK_OVERLAP", "80"))
 
 
 # ---------------------------- Helpers ----------------------------
@@ -43,17 +46,66 @@ def read_text(path: str) -> str:
         return f.read()
 
 
-def split_markdown(markdown_text: str):
-    splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[(h, h) for h in HEADER_LEVELS])
-    return splitter.split_text(markdown_text)
+def _approximate_token_length(text: str) -> int:
+    """Fallback token estimate when a real tokenizer is unavailable."""
+
+    return max(1, len(text.split()))
+
+
+def _build_splitter() -> RecursiveCharacterTextSplitter:
+    """Return a token-aware text splitter with a sensible amount of overlap."""
+
+    # Guard against accidental misconfiguration that sets overlap >= chunk size.
+    overlap = max(0, min(CHUNK_OVERLAP_TOKENS, max(CHUNK_SIZE_TOKENS - 1, 0)))
+    chunk_size = max(1, CHUNK_SIZE_TOKENS)
+
+    try:
+        return RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+            model_name=DEFAULT_TIKTOKEN_MODEL,
+            chunk_size=chunk_size,
+            chunk_overlap=overlap,
+        )
+    except Exception:  # pragma: no cover - network restricted environments fall back here
+        return RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=overlap,
+            length_function=_approximate_token_length,
+        )
+
+
+_SPLITTER = _build_splitter()
+
+
+def split_markdown(markdown_text: str, *, source_path: str) -> List[Document]:
+    """Split text into token-bounded chunks while retaining document metadata."""
+
+    base_metadata = {
+        "source": os.path.basename(source_path),
+        "source_path": source_path,
+    }
+    documents = _SPLITTER.create_documents(
+        [markdown_text],
+        metadatas=[base_metadata],
+    )
+
+    total_chunks = len(documents)
+    for idx, doc in enumerate(documents):
+        metadata = getattr(doc, "metadata", {}) or {}
+        metadata.update({
+            "chunk_index": idx,
+            "chunk_count": total_chunks,
+        })
+        doc.metadata = metadata
+
+    return documents
 
 
 # (Persistence helpers removed – not needed now.)
 
 
 # ---------------------------- Core processing ----------------------------
-def process_file(path: str):
-    return split_markdown(read_text(path))
+def process_file(path: str) -> Iterable[Document]:
+    return split_markdown(read_text(path), source_path=path)
 
 
 def ingest() -> List:
@@ -72,8 +124,12 @@ def ingest() -> List:
 
 def preview(docs, n: int = 3):
     for i, d in enumerate(docs[:n]):
-        headers = [d.metadata.get(h) for h in HEADER_LEVELS if d.metadata.get(h)]
-        print(f"[{i}] {' > '.join(headers) if headers else '<no header>'}")
+        metadata = getattr(d, "metadata", {}) or {}
+        source = metadata.get("source", "<unknown source>")
+        idx = metadata.get("chunk_index")
+        count = metadata.get("chunk_count")
+        chunk_label = f"chunk {idx + 1}/{count}" if isinstance(idx, int) and isinstance(count, int) else "chunk"
+        print(f"[{i}] {source} • {chunk_label}")
         snippet = d.page_content.strip().replace('\n', ' ')
         print(snippet[:200] + ('...' if len(snippet) > 200 else ''))
 
