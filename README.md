@@ -177,19 +177,25 @@ To improve the accuracy of the top-k retrieval, the query script applies a light
 
 - Lexical overlap is the fraction of question tokens found in a candidate chunk:
 
-  $$\text{lexical}(q, d) = \frac{|\,\text{tokens}(q) \cap \text{tokens}(d)\,|}{|\,\text{tokens}(q)\,|}$$
+  $$
+  \text{lexical}(q, d) = \frac{|\,\text{tokens}(q) \cap \text{tokens}(d)\,|}{|\,\text{tokens}(q)\,|}
+  $$
 
 - Retriever scores are min–max normalized to $[0,1]$ across the retrieved set:
 
-  $$\text{retriever\_norm}(s) = \begin{cases}
+  $$
+  \text{retriever\_norm}(s) = \begin{cases}
   0 & \text{if } s_{\max} = s_{\min} = 0 \\
   1 & \text{if } s_{\max} = s_{\min} \neq 0 \\
   \dfrac{s - s_{\min}}{s_{\max} - s_{\min}} & \text{otherwise}
-  \end{cases}$$
+  \end{cases}
+  $$
 
 - The final rerank score is a convex combination controlled by $\alpha \in [0,1]$:
 
-  $$\text{combined} = \alpha \cdot \text{retriever\_norm} + (1-\alpha) \cdot \text{lexical}$$
+  $$
+  \text{combined} = \alpha \cdot \text{retriever\_norm} + (1-\alpha) \cdot \text{lexical}
+  $$
 
 In `scripts/02_query.py`, reranking stores the following in each chunk’s metadata so they are visible in outputs:
 
