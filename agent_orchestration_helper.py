@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 from typing import Optional, Sequence, Tuple, Any, List
+import warnings
+import json
+from pathlib import Path
 from pydantic import BaseModel, Field
 
 try:
@@ -9,24 +12,78 @@ try:
 except Exception:
     BaseMessage = Any  # type: ignore
 
+# Suppress noisy deprecation warnings without changing packages.
+try:  # Best-effort: some environments provide this warning class
+    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
+    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
+except Exception:
+    # Fallback to message-based filters if the class isn't importable
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*HuggingFaceEmbeddings.*was deprecated.*",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*manual persistence method is no longer supported.*",
+    )
+
 from utils.inventory_view import build_specialization_list
 from utils.persona import build_persona_preamble
 from utils.text_sanitize import validate_output
 
-RAG_TOPIC_INVENTORY: str = """
+# To customize the content inventory without editing code, edit the JSON file
+# placed next to this module: rag_content.json
+# Schema:
+# {
+#   "rag_topic_inventory": "...multi-line text...",
+#   "specialization_topics": ["topic 1", "topic 2", ...]
+# }
+
+DEFAULT_RAG_TOPIC_INVENTORY: str = (
+    """
 RAG covers:
 - Kanto region field notes for Generation I Pokémon (focus on Pikachu)
 - Species bios, habitats, abilities, typings, base stats, movesets
 - Trainer tips, battle tactics, evolutionary paths, item interactions
 - No real-time events; canonical up to the Indigo League era (circa 1998)
 """.strip()
+)
 
-SPECIALIZATION_TOPICS = [
+DEFAULT_SPECIALIZATION_TOPICS = [
     "Generation I Pokémon field research across the Kanto region",
     "Species bios, habitats, abilities, typings, base stats, and movesets",
     "Trainer strategies, battle tactics, evolutionary paths, and item interactions",
     "Lore through the Indigo League era (circa 1998)",
 ]
+
+
+def _load_agent_content_from_json() -> Tuple[str, List[str]]:
+    """Load inventory/topics from rag_content.json with safe fallbacks.
+
+    Returns:
+        (rag_topic_inventory, specialization_topics)
+    """
+    cfg_path = Path(__file__).with_name("rag_content.json")
+    try:
+        with cfg_path.open("r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+        rag_text = str(data.get("rag_topic_inventory") or "").strip()
+        topics = data.get("specialization_topics")
+        if not rag_text:
+            rag_text = DEFAULT_RAG_TOPIC_INVENTORY
+        if not isinstance(topics, list) or not topics:
+            topics = DEFAULT_SPECIALIZATION_TOPICS
+        # Coerce items to str
+        topics = [str(t) for t in topics]
+        return rag_text, topics  # type: ignore[return-value]
+    except FileNotFoundError:
+        return DEFAULT_RAG_TOPIC_INVENTORY, DEFAULT_SPECIALIZATION_TOPICS
+    except Exception:
+        # On any parse/IO error, fall back to baked-in defaults
+        return DEFAULT_RAG_TOPIC_INVENTORY, DEFAULT_SPECIALIZATION_TOPICS
+
+
+RAG_TOPIC_INVENTORY, SPECIALIZATION_TOPICS = _load_agent_content_from_json()
 
 SPECIALIZATION_LIST = build_specialization_list(SPECIALIZATION_TOPICS)
 
@@ -68,7 +125,7 @@ Return a compact decision.
 
 def get_prev_ai_message_text(history_adapter: Any, max_lookback: int = 1) -> str:
     try:
-        msgs: List[BaseMessage] = list(getattr(history_adapter, "messages", []) or [])
+        msgs: List[Any] = list(getattr(history_adapter, "messages", []) or [])
     except Exception:
         return ""
     if not msgs:
@@ -172,7 +229,7 @@ def build_rewriter(llm: Any):
                         content = str(m.get("content", ""))
                         break
                 q = content.split("User message:")[-1].strip() or content.strip()
-                return QueryRewrite(query=q, rationale="plain fallback", keywords=[], entities=[])
+                return QueryRewrite(query=q, rationale="plain fallback", keywords=[], entities=[], suspected_topic=None)
         return _PlainRewriter()
 
 def rewrite_for_retrieval(

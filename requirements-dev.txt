@@ -1,0 +1,2 @@
+# Development-only dependencies (do not deploy in production images)
+pytest>=7.0,<9

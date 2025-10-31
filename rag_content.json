@@ -1,0 +1,9 @@
+{
+  "rag_topic_inventory": "RAG covers:\n- Kanto region field notes for Generation I Pokémon (focus on Pikachu)\n- Species bios, habitats, abilities, typings, base stats, movesets\n- Trainer tips, battle tactics, evolutionary paths, item interactions\n- No real-time events; canonical up to the Indigo League era (circa 1998)",
+  "specialization_topics": [
+    "Generation I Pokémon field research across the Kanto region",
+    "Species bios, habitats, abilities, typings, base stats, and movesets",
+    "Trainer strategies, battle tactics, evolutionary paths, and item interactions",
+    "Lore through the Indigo League era (circa 1998)"
+  ]
+}
