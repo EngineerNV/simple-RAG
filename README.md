@@ -185,9 +185,9 @@ To improve the accuracy of the top-k retrieval, the query script applies a light
 
   $$
   \text{retriever\_norm}(s) = \begin{cases}
-  0 & \text{if } s_{\max} = s_{\min} = 0 \\
-  1 & \text{if } s_{\max} = s_{\min} \neq 0 \\
-  \dfrac{s - s_{\min}}{s_{\max} - s_{\min}} & \text{otherwise}
+  0 & \text{if } s_{\text{max}} = s_{\text{min}} = 0 \\
+  1 & \text{if } s_{\text{max}} = s_{\text{min}} \neq 0 \\
+  \dfrac{s - s_{\text{min}}}{s_{\text{max}} - s_{\text{min}}} & \text{otherwise}
   \end{cases}
   $$
 
