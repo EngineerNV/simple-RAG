@@ -41,7 +41,6 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_core._api.deprecation import LangChainDeprecationWarning
 
 from agent_orchestration_helper import (
     RAG_TOPIC_INVENTORY,
@@ -69,7 +68,20 @@ retrieve_contexts = query_module.retrieve_contexts  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 
-warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
+# Suppress noisy deprecation warnings without changing packages.
+try:  # Best-effort: some environments provide this warning class
+    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
+    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
+except Exception:
+    # Fallback to message-based filters if the class isn't importable
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*HuggingFaceEmbeddings.*was deprecated.*",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*manual persistence method is no longer supported.*",
+    )
 
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -130,7 +142,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--embedding-model", default=DEFAULT_EMBED_MODEL, help="Embedding model to load for retrieval")
     parser.add_argument("--persist-dir", default=str(CHROMA_DIR), help="Path to the persisted Chroma directory")
     parser.add_argument("--llm-model", default=DEFAULT_LLM_MODEL, help="Chat model identifier for responses")
-    parser.add_argument("--provider", default="openai", help="LLM provider identifier")
+    parser.add_argument("--provider", default=None, help="LLM provider override (auto-detected from API keys if not specified)")
     parser.add_argument("--api-key", dest="api_key", help="Explicit API key override for the LLM provider")
     parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature for the chat model")
     parser.add_argument("--max-tokens", type=int, default=2000, help="Maximum tokens per LLM response")
@@ -142,17 +154,67 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def resolve_api_key(explicit: str | None) -> str | None:
+def auto_detect_provider() -> tuple[str, str] | None:
+    """Auto-detect provider based on which API key is set.
+    
+    Returns:
+        (provider_name, api_key) tuple or None if no key found.
+    """
+    if os.environ.get("OPENAI_API_KEY"):
+        return ("openai", os.environ["OPENAI_API_KEY"])
+    if os.environ.get("GOOGLE_API_KEY"):
+        return ("gemini", os.environ["GOOGLE_API_KEY"])
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return ("claude", os.environ["ANTHROPIC_API_KEY"])
+    return None
+
+
+def resolve_api_key(explicit: str | None, provider_hint: str | None = None) -> tuple[str, str | None]:
+    """Resolve the provider and API key from explicit args or environment.
+    
+    Args:
+        explicit: Explicit --api-key override
+        provider_hint: Explicit --provider override
+        
+    Returns:
+        (provider, api_key) tuple
+    """
+    # If both explicit values provided, use them
+    if explicit and provider_hint:
+        return (provider_hint, explicit)
+    
+    # If only explicit key, need to detect provider
     if explicit:
-        return explicit
-    return os.environ.get("OPENAI_API_KEY") or os.environ.get("RAG_LLM_API_KEY")
+        if provider_hint:
+            return (provider_hint, explicit)
+        # Try to auto-detect from env vars as fallback
+        detected = auto_detect_provider()
+        return (detected[0], explicit) if detected else ("openai", explicit)
+    
+    # Auto-detect from environment
+    detected = auto_detect_provider()
+    if detected:
+        # If provider_hint given, respect it but use auto-detected key
+        if provider_hint:
+            return (provider_hint, detected[1])
+        return detected
+    
+    # No key found anywhere
+    return (provider_hint or "openai", None)
 
 
 def format_contexts(results) -> List[str]:
     formatted: List[str] = []
     for idx, (doc, score) in enumerate(results):
         snippet = clean_snippet(doc.page_content)
-        source_label = f"[source {idx}] score={score:.3f}"
+        combined = None
+        try:
+            combined = getattr(doc, "metadata", {}).get("combined_score")
+        except Exception:
+            combined = None
+        source_label = (
+            f"[source {idx}] score={score:.3f} rerank={combined:.3f}" if combined is not None else f"[source {idx}] score={score:.3f}"
+        )
         if snippet:
             formatted.append(f"{source_label}\n{snippet}")
         else:
@@ -171,7 +233,15 @@ def render_context_table(results, console: Console) -> None:
         snippet = clean_snippet(doc.page_content) or "(empty snippet)"
         meta = doc.metadata or {}
         meta_bits = ", ".join(f"{k}={v}" for k, v in meta.items()) if meta else "no metadata"
-        header = f"[{idx}] score={score:.3f}\n{meta_bits}"
+        combined = None
+        try:
+            combined = getattr(doc, "metadata", {}).get("combined_score")
+        except Exception:
+            combined = None
+        if combined is not None:
+            header = f"[{idx}] score={score:.3f} rerank={combined:.3f}\n{meta_bits}"
+        else:
+            header = f"[{idx}] score={score:.3f}\n{meta_bits}"
         table.add_row(header, textwrap.fill(snippet, width=80))
     console.print(table)
 
@@ -239,12 +309,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     logger.debug("Retrieval store initialised with embedding model '%s' at '%s'.", args.embedding_model, args.persist_dir)
 
-    api_key = resolve_api_key(args.api_key)
-    provider = args.provider
+    provider, api_key = resolve_api_key(args.api_key, args.provider)
 
     if not api_key:
         console.print(
-            "[red]No API key available. Set --api-key or the OPENAI_API_KEY/RAG_LLM_API_KEY environment variable.[/red]"
+            "[red]No API key available. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.[/red]"
         )
         sys.exit(1)
 

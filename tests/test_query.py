@@ -63,3 +63,27 @@ def test_run_llm_mode_falls_back_without_key(capsys: pytest.CaptureFixture[str])
     captured = capsys.readouterr()
     assert "OpenAI API key missing" in captured.err
     assert "(mock) Answer" in captured.out
+
+
+def test_rerank_promotes_lexical_match() -> None:
+    # Build results where doc[0] has higher retriever score but no lexical
+    # overlap, and doc[1] contains the query token but has lower retriever score.
+    doc_a = Document(page_content="completely unrelated content", metadata={})
+    doc_b = Document(page_content="This chunk mentions RAG and retrieval.", metadata={})
+    results = [(doc_a, 0.9), (doc_b, 0.2)]
+
+    # Use alpha=0 to prioritize lexical overlap for this test case.
+    reranked = query_module.rerank_results(results, "What is RAG?", alpha=0.0)
+
+    # Expect the lexical match (doc_b) to be promoted above doc_a when lexical
+    # overlap is combined with retriever score.
+    assert reranked[0][0].page_content.startswith("This chunk mentions RAG")
+
+
+def test_rerank_handles_empty_question() -> None:
+    doc = Document(page_content="content", metadata={})
+    results = [(doc, 0.7)]
+    # Empty question should not raise and should return the same single result
+    out = query_module.rerank_results(results, "", alpha=0.5)
+    assert len(out) == 1
+    assert out[0][0].page_content == "content"

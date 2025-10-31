@@ -30,10 +30,26 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib import import_module
+import warnings
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
 from langchain_community.embeddings import HuggingFaceEmbeddings
+
+# Suppress noisy deprecation warnings without changing packages.
+try:  # Best-effort: some environments provide this warning class
+    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
+    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
+except Exception:
+    # Fallback to message-based filters if the class isn't importable
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*HuggingFaceEmbeddings.*was deprecated.*",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*manual persistence method is no longer supported.*",
+    )
 
 
 # -- Lightweight lexical overlap helper -----------------------------------------------------
@@ -567,8 +583,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2", help="Embedding model name")
     parser.add_argument("--llm-model", default="gpt-5-mini", help="Chat model name for llm mode")
-    parser.add_argument("--provider", default="openai", help="LLM provider identifier")
-    parser.add_argument("--api-key", dest="api_key", help="API key (defaults to OPENAI_API_KEY)")
+    parser.add_argument("--provider", default=None, help="LLM provider override (auto-detected from API keys if not specified)")
+    parser.add_argument("--api-key", dest="api_key", help="API key override (auto-detected from environment if not specified)")
     parser.add_argument("--base-url", dest="base_url", help="Optional OpenAI-compatible base URL")
     parser.add_argument("--temperature", type=float, default=0.2, help="LLM sampling temperature")
     parser.add_argument("--max-tokens", type=int, default=2000, help="LLM max tokens")
@@ -628,7 +644,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(str(exc), file=sys.stderr)
         return
 
-    api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
+    provider, api_key = query_module.resolve_provider_and_key(args.api_key, args.provider)
+    
+    if not api_key:
+        print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.", file=sys.stderr)
+        sys.exit(1)
 
     records: List[ReviewRecord] = []
     for question_entry in questions:
@@ -639,7 +659,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             query_module=query_module,
             agent_mode=args.agent_mode,
             k=args.k,
-            provider=args.provider,
+            provider=provider,
             llm_model=args.llm_model,
             api_key=api_key,
             temperature=args.temperature,

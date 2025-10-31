@@ -12,6 +12,7 @@ import json
 import os
 import re
 import statistics
+import sys
 from importlib import import_module
 from pathlib import Path
 from typing import Iterable, List, Mapping, MutableMapping, Sequence
@@ -295,8 +296,8 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=3, help="Number of contexts to retrieve when generating predictions")
     parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2", help="Embedding model name")
     parser.add_argument("--llm-model", default="gpt-5-mini", help="Chat model name when --agent-mode llm is used")
-    parser.add_argument("--provider", default="openai", help="LLM provider identifier")
-    parser.add_argument("--api-key", dest="api_key", help="Provider API key (defaults to OPENAI_API_KEY env var)")
+    parser.add_argument("--provider", default=None, help="LLM provider override (auto-detected from API keys if not specified)")
+    parser.add_argument("--api-key", dest="api_key", help="API key override (auto-detected from environment if not specified)")
     parser.add_argument("--temperature", type=float, default=0.2, help="Chat model temperature")
     parser.add_argument("--max-tokens", type=int, default=2000, help="Chat model max tokens")
     parser.add_argument("--base-url", dest="base_url", help="Optional OpenAI-compatible base URL")
@@ -314,7 +315,14 @@ def main() -> None:
         questions = load_question_file(question_file)
         if not questions:
             raise ValueError("Question file was empty; nothing to evaluate.")
-        api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
+        
+        query_module = _load_query_module()
+        provider, api_key = query_module.resolve_provider_and_key(args.api_key, args.provider)
+        
+        if not api_key:
+            print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.")
+            sys.exit(1)
+        
         raw_examples = generate_predictions(
             questions=questions,
             k=args.k,
