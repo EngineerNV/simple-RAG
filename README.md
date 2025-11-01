@@ -1,6 +1,10 @@
 # simple-RAG — Retrieval-Augmented Generation Lab
 
-`simple-RAG` is a teaching project that ships a minimal but runnable retrieval pipeline built with LangChain and Chroma. The repository now includes working ingestion, indexing, retrieval, evaluation, and LLM helper scripts so you can focus on experimenting rather than scaffolding.
+`simple-RAG` is a project that ships a minimal but runnable retrieval pipeline built with LangChain and Chroma. The repository now includes working ingestion, indexing, retrieval, evaluation, and LLM helper scripts so you can focus on experimenting rather than scaffolding.
+
+[Watch Demo Video](https://drive.google.com/file/d/1xM5Y6-JccKDqi6ozH2pny2fycPhVP2VO/view?usp=sharing)
+
+[Watch High Level Summary of Repository](https://drive.google.com/file/d/1InwxNeIiRv4fUCJE-T4WES4uxoB3AuGK/view?usp=sharing)
 
 ## Quick start
 
