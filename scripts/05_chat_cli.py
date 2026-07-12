@@ -3,21 +3,20 @@
 This script turns the retrieval pipeline into an interactive chat experience. It
 keeps a running conversation, maintains a rolling summary via LangChain memory so
 the LLM can carry context, and surfaces the retrieved snippets that ground each
-answer.
+answer. Per-turn orchestration (routing, retrieval, prompting) lives in
+:mod:`agent_orchestration_helper`; this file only renders the conversation.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 import textwrap
-import warnings
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple, Any
+from typing import Iterable, List, Sequence
 
 try:  # Optional dependency for convenient local development.
     from dotenv import load_dotenv
@@ -35,61 +34,35 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
-from langchain.memory import ConversationSummaryBufferMemory
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
 from agent_orchestration_helper import (
-    RAG_TOPIC_INVENTORY,
-    SPECIALIZATION_LIST,
-    build_decider,
-    decide_use_rag,
-    build_rewriter,
-    apply_rewrite_and_retrieve,
-    build_user_payload,
+    ChatSession,
+    build_router,
+    build_system_prompt,
 )
-from utils import (
-    build_rejection_writer,
-    build_topic_guard,
-    generate_rejection,
-    topic_gate,
-)
+from utils import build_rejection_writer, suppress_langchain_warnings
+from utils import settings
+from utils.chat_history import SummaryBufferHistory
+from utils.llm import resolve_model, resolve_provider_and_key
 
 query_module = import_module("scripts.02_query")
 
 clean_snippet = query_module.clean_snippet  # type: ignore[attr-defined]
 create_retrieval_store = query_module.create_retrieval_store  # type: ignore[attr-defined]
 load_chat_model = query_module.load_chat_model  # type: ignore[attr-defined]
-compose_user_prompt = query_module.compose_user_prompt  # type: ignore[attr-defined]
 retrieve_contexts = query_module.retrieve_contexts  # type: ignore[attr-defined]
+
+suppress_langchain_warnings()
 
 logger = logging.getLogger(__name__)
 
-# Suppress noisy deprecation warnings without changing packages.
-try:  # Best-effort: some environments provide this warning class
-    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
-    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
-except Exception:
-    # Fallback to message-based filters if the class isn't importable
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*HuggingFaceEmbeddings.*was deprecated.*",
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*manual persistence method is no longer supported.*",
-    )
 
-
-DEFAULT_SYSTEM_PROMPT = (
-    "Stay in expert research assistant mode. Follow the persona and context provided in the user message."
-)
-DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_LLM_MODEL = "gpt-5-mini"
-CHROMA_DIR = Path("data") / "chroma"
+DEFAULT_EMBED_MODEL = settings.DEFAULT_EMBED_MODEL
+CHROMA_DIR = settings.CHROMA_DIR
 
 
 @dataclass
@@ -108,118 +81,26 @@ class TranscriptLog:
         return iter(self.user_contexts)
 
 
-class SummaryHistoryAdapter(BaseChatMessageHistory):
-    """Adapts ``ConversationSummaryBufferMemory`` for runnable message history."""
-
-    def __init__(self, memory: ConversationSummaryBufferMemory):
-        self._memory = memory
-
-    @property
-    def memory(self) -> ConversationSummaryBufferMemory:
-        return self._memory
-
-    @property
-    def messages(self) -> List[BaseMessage]:
-        stored = self._memory.load_memory_variables({}).get(self._memory.memory_key, [])
-        return list(stored) if isinstance(stored, Iterable) else []
-
-    def add_message(self, message: BaseMessage) -> None:
-        self._memory.chat_memory.add_message(message)
-        self._memory.prune()
-
-    def add_messages(self, messages: Iterable[BaseMessage]) -> None:
-        for message in messages:
-            self._memory.chat_memory.add_message(message)
-        self._memory.prune()
-
-    def clear(self) -> None:
-        self._memory.clear()
-
-
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Terminal RAG chat playground")
     parser.add_argument("--retrieval-k", type=int, default=3, help="Number of context chunks to retrieve per question")
     parser.add_argument("--embedding-model", default=DEFAULT_EMBED_MODEL, help="Embedding model to load for retrieval")
     parser.add_argument("--persist-dir", default=str(CHROMA_DIR), help="Path to the persisted Chroma directory")
-    parser.add_argument("--llm-model", default=DEFAULT_LLM_MODEL, help="Chat model identifier for responses")
+    parser.add_argument("--llm-model", default=None, help="Chat model identifier (defaults to the resolved provider's default model)")
     parser.add_argument("--provider", default=None, help="LLM provider override (auto-detected from API keys if not specified)")
     parser.add_argument("--api-key", dest="api_key", help="Explicit API key override for the LLM provider")
-    parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature for the chat model")
+    parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature for the chat model (omitted unless set)")
     parser.add_argument("--max-tokens", type=int, default=2000, help="Maximum tokens per LLM response")
     parser.add_argument("--base-url", dest="base_url", help="Optional base URL for OpenAI-compatible endpoints")
-    parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT, help="System prompt that governs assistant behaviour")
+    parser.add_argument(
+        "--system-prompt",
+        default=None,
+        help="Replace the entire built-in system prompt (persona + grounding rules) with your own text",
+    )
     parser.add_argument("--show-context", action="store_true", help="Display retrieved snippets for each answer")
     parser.add_argument("--save-transcript", dest="transcript_path", help="Optional file path to write the chat transcript on exit")
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging to stderr")
     return parser.parse_args(argv)
-
-
-def auto_detect_provider() -> tuple[str, str] | None:
-    """Auto-detect provider based on which API key is set.
-    
-    Returns:
-        (provider_name, api_key) tuple or None if no key found.
-    """
-    if os.environ.get("OPENAI_API_KEY"):
-        return ("openai", os.environ["OPENAI_API_KEY"])
-    if os.environ.get("GOOGLE_API_KEY"):
-        return ("gemini", os.environ["GOOGLE_API_KEY"])
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return ("claude", os.environ["ANTHROPIC_API_KEY"])
-    return None
-
-
-def resolve_api_key(explicit: str | None, provider_hint: str | None = None) -> tuple[str, str | None]:
-    """Resolve the provider and API key from explicit args or environment.
-    
-    Args:
-        explicit: Explicit --api-key override
-        provider_hint: Explicit --provider override
-        
-    Returns:
-        (provider, api_key) tuple
-    """
-    # If both explicit values provided, use them
-    if explicit and provider_hint:
-        return (provider_hint, explicit)
-    
-    # If only explicit key, need to detect provider
-    if explicit:
-        if provider_hint:
-            return (provider_hint, explicit)
-        # Try to auto-detect from env vars as fallback
-        detected = auto_detect_provider()
-        return (detected[0], explicit) if detected else ("openai", explicit)
-    
-    # Auto-detect from environment
-    detected = auto_detect_provider()
-    if detected:
-        # If provider_hint given, respect it but use auto-detected key
-        if provider_hint:
-            return (provider_hint, detected[1])
-        return detected
-    
-    # No key found anywhere
-    return (provider_hint or "openai", None)
-
-
-def format_contexts(results) -> List[str]:
-    formatted: List[str] = []
-    for idx, (doc, score) in enumerate(results):
-        snippet = clean_snippet(doc.page_content)
-        combined = None
-        try:
-            combined = getattr(doc, "metadata", {}).get("combined_score")
-        except Exception:
-            combined = None
-        source_label = (
-            f"[source {idx}] score={score:.3f} rerank={combined:.3f}" if combined is not None else f"[source {idx}] score={score:.3f}"
-        )
-        if snippet:
-            formatted.append(f"{source_label}\n{snippet}")
-        else:
-            formatted.append(f"{source_label}\n(empty snippet)")
-    return formatted
 
 
 def render_context_table(results, console: Console) -> None:
@@ -233,11 +114,7 @@ def render_context_table(results, console: Console) -> None:
         snippet = clean_snippet(doc.page_content) or "(empty snippet)"
         meta = doc.metadata or {}
         meta_bits = ", ".join(f"{k}={v}" for k, v in meta.items()) if meta else "no metadata"
-        combined = None
-        try:
-            combined = getattr(doc, "metadata", {}).get("combined_score")
-        except Exception:
-            combined = None
+        combined = meta.get("combined_score")
         if combined is not None:
             header = f"[{idx}] score={score:.3f} rerank={combined:.3f}\n{meta_bits}"
         else:
@@ -247,29 +124,21 @@ def render_context_table(results, console: Console) -> None:
 
 
 def save_transcript(
-    memory: ConversationSummaryBufferMemory,
+    history: SummaryBufferHistory,
     transcript_log: TranscriptLog,
     path: Path,
     console: Console,
 ) -> None:
     try:
         lines = []
-        summary_text = memory.moving_summary_buffer.strip()
+        summary_text = history.moving_summary_buffer.strip()
         if summary_text:
             lines.append("# Conversation summary\n" + summary_text + "\n")
 
         user_contexts = list(transcript_log.iter_user_contexts())
         user_index = 0
-        history_messages = memory.load_memory_variables({}).get(memory.memory_key, [])
 
-        for message in history_messages:
-            if (
-                isinstance(message, memory.summary_message_cls)
-                and message.content == memory.moving_summary_buffer
-            ):
-                # The summary is already recorded above; skip the placeholder message.
-                continue
-
+        for message in history.raw_messages:
             if isinstance(message, HumanMessage):
                 lines.append(f"## User\n{message.content}\n")
                 if user_index < len(user_contexts) and user_contexts[user_index]:
@@ -309,7 +178,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     logger.debug("Retrieval store initialised with embedding model '%s' at '%s'.", args.embedding_model, args.persist_dir)
 
-    provider, api_key = resolve_api_key(args.api_key, args.provider)
+    provider, api_key = resolve_provider_and_key(args.api_key, args.provider)
 
     if not api_key:
         console.print(
@@ -317,12 +186,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    logger.debug("Using provider '%s' with model '%s'.", provider, args.llm_model)
+    llm_model = resolve_model(provider, args.llm_model)
+    logger.debug("Using provider '%s' with model '%s'.", provider, llm_model)
 
     try:
         llm = load_chat_model(
             provider=provider,
-            model_name=args.llm_model,
+            model_name=llm_model,
             api_key=api_key,
             temperature=args.temperature,
             max_tokens=args.max_tokens,
@@ -332,42 +202,40 @@ def main(argv: Sequence[str] | None = None) -> None:
         console.print(f"[red]{exc}[/red]")
         sys.exit(1)
 
-    decider_llm = build_decider(llm)
-    rewriter_llm = build_rewriter(llm)
-    topic_guard_llm = build_topic_guard(llm)
+    router_llm = build_router(llm)
     rejection_llm = build_rejection_writer(llm)
 
-    logger.debug(
-        "LLM loaded; structured helpers ready (decider=%s, rewriter=%s, topic_guard=%s, rejection_writer=%s).",
-        type(decider_llm).__name__,
-        type(rewriter_llm).__name__,
-        type(topic_guard_llm).__name__,
-        type(rejection_llm).__name__,
-    )
-
-    memory = ConversationSummaryBufferMemory(
-        llm=llm,
-        memory_key="chat_history",
-        return_messages=True,
-        max_token_limit=max(args.max_tokens * 2, 1200),
-    )
-    history_adapter = SummaryHistoryAdapter(memory)
+    history = SummaryBufferHistory(llm=llm, max_token_limit=max(args.max_tokens * 2, 1200))
 
     logger.debug("Conversation memory initialised with max_token_limit=%s.", max(args.max_tokens * 2, 1200))
 
+    # The system prompt stays byte-identical across turns (good for provider
+    # prompt caching); the retrieved evidence rides in the current human turn
+    # only, while history stores just the user's actual message.
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", "{system_prompt}"),
             MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{user_message}"),
+            ("human", "{context_block}{user_message}"),
         ]
     )
     response_chain = prompt | llm | StrOutputParser()
     chat_with_history = RunnableWithMessageHistory(
         response_chain,
-        lambda _session_id: history_adapter,
+        lambda _session_id: history,
         input_messages_key="user_message",
         history_messages_key="chat_history",
+    )
+
+    session = ChatSession(
+        router_llm=router_llm,
+        rejection_llm=rejection_llm,
+        chat_with_history=chat_with_history,
+        history_adapter=history,
+        store=store,
+        retrieve_contexts_fn=retrieve_contexts,
+        system_prompt=args.system_prompt or build_system_prompt(),
+        retrieval_k=args.retrieval_k,
     )
 
     console.print(
@@ -382,7 +250,6 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     transcript_log = TranscriptLog()
     show_context = args.show_context
-    session_id = "cli-session"
 
     while True:
         try:
@@ -396,16 +263,6 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         logger.debug("Received user message: %s", user_message)
 
-        normalized = user_message.strip().lower()
-        if any(phrase in normalized for phrase in ("who are you", "what are you", "what do you do")):
-            answer = f"I’m an expert research assistant specializing in: {SPECIALIZATION_LIST}."
-            history_adapter.add_messages(
-                [HumanMessage(content=user_message), AIMessage(content=answer)]
-            )
-            transcript_log.add_user_context([])
-            console.print(Panel(answer, title="Assistant", style="green"))
-            continue
-
         if user_message.startswith("/"):
             command = user_message.lstrip("/").lower()
             if command in {"exit", "quit"}:
@@ -414,7 +271,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 console.print("Commands: /help, /exit, /reset, /showctx (toggle context display)")
                 continue
             if command == "reset":
-                history_adapter.clear()
+                history.clear()
                 transcript_log.reset()
                 console.print("[green]Cleared conversation history.[/green]")
                 continue
@@ -425,103 +282,21 @@ def main(argv: Sequence[str] | None = None) -> None:
             console.print(f"[yellow]Unknown command '{command}'. Try /help.[/yellow]")
             continue
 
-        results: Sequence[Tuple[Any, float]] = []
-        context_blocks: Sequence[str] = []
-        answer = ""
-        use_rag = False
-        decision = None
-        manual_history_update = False
-
         with console.status("[cyan]Thinking...[/cyan]", spinner="dots"):
-            gate_decision = topic_gate(
-                guard_llm=topic_guard_llm,
-                user_message=user_message,
-                specialization_list=SPECIALIZATION_LIST,
-            )
-            gate_payload = gate_decision.model_dump() if hasattr(gate_decision, "model_dump") else gate_decision.dict()
-            logger.debug("Topic gate verdict: %s", gate_payload)
+            result = session.handle_turn(user_message)
 
-            if not gate_decision.on_topic:
-                answer = generate_rejection(
-                    llm=rejection_llm,
-                    specialization_list=SPECIALIZATION_LIST,
-                    user_message=user_message,
-                )
-                logger.debug("Off-topic gate triggered (reason: %s).", gate_decision.reason)
-                manual_history_update = True
-            else:
-                decision = decide_use_rag(
-                    decider_llm=decider_llm,
-                    history_adapter=history_adapter,
-                    user_message=user_message,
-                    rag_topics=RAG_TOPIC_INVENTORY,
-                    memory=history_adapter.memory,
-                    min_conf=0.70,
-                )
-                use_rag = decision.use_rag
+        if result.error:
+            # The failed turn left no residue in history; keep the session alive.
+            console.print(f"[red]LLM call failed: {result.error}[/red]")
 
-                decision_payload = decision.model_dump() if hasattr(decision, "model_dump") else decision.dict()
-                logger.debug("Decider verdict: %s", decision_payload)
+        transcript_log.add_user_context(result.context_blocks)
+        if result.used_rag and show_context:
+            render_context_table(result.results, console)
 
-                if use_rag:
-                    rewrite, results = apply_rewrite_and_retrieve(
-                        rewriter_llm=rewriter_llm,
-                        retrieve_contexts_fn=retrieve_contexts,
-                        store=store,
-                        user_message=user_message,
-                        history_adapter=history_adapter,
-                        rag_topics=RAG_TOPIC_INVENTORY,
-                        k=args.retrieval_k,
-                        use_namespace_filter=False,
-                    )
-                    rewrite_payload = rewrite.model_dump() if hasattr(rewrite, "model_dump") else rewrite.dict()
-                    logger.debug("Query rewrite produced: %s", rewrite_payload)
-                    logger.debug(
-                        "Retrieved %d context chunks via rewritten query '%s'.",
-                        len(results),
-                        rewrite.query or user_message,
-                    )
-                    context_blocks = format_contexts(results)
-                else:
-                    results = []
-                    context_blocks = []
-                    logger.debug("RAG skipped for this turn (reason: %s).", decision.reason)
-
-                try:
-                    user_payload = build_user_payload(
-                        user_message=user_message,
-                        results=results,
-                        compose_user_prompt_fn=compose_user_prompt,
-                        use_rag=use_rag,
-                        decision=decision,
-                    )
-                    logger.debug("User payload forwarded to LLM (truncated): %s", user_payload[:500])
-                    answer = chat_with_history.invoke(
-                        {
-                            "system_prompt": args.system_prompt,
-                            "user_message": user_payload,
-                        },
-                        config={"configurable": {"session_id": session_id}},
-                    )
-                    logger.debug("LLM output (truncated): %s", answer[:500])
-                except Exception as exc:
-                    logger.exception("LLM call failed.")
-                    console.print(f"[red]LLM call failed: {exc}[/red]")
-                    sys.exit(1)
-
-        if manual_history_update:
-            history_adapter.add_messages(
-                [HumanMessage(content=user_message), AIMessage(content=answer)]
-            )
-
-        transcript_log.add_user_context(context_blocks)
-        if use_rag and show_context:
-            render_context_table(results, console)
-
-        console.print(Panel(answer, title="Assistant", style="green"))
+        console.print(Panel(result.answer, title="Assistant", style="green"))
 
     if args.transcript_path:
-        save_transcript(memory, transcript_log, Path(args.transcript_path), console)
+        save_transcript(history, transcript_log, Path(args.transcript_path), console)
 
 
 if __name__ == "__main__":

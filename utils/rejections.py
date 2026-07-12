@@ -29,7 +29,7 @@ Write only the refusal text.'''
 
 def build_rejection_writer(llm):
     """Bind the provided LLM to the rejection schema."""
-    return llm.bind(max_tokens=300, max_completion_tokens=300).with_structured_output(RejectionOut)
+    return llm.with_structured_output(RejectionOut)
 
 
 def generate_rejection(llm, specialization_list: str, user_message: str) -> str:

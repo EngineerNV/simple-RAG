@@ -1,7 +1,4 @@
-"""Persona helper for the expert research assistant."""
-
-from typing import Optional
-
+"""Persona text for the expert research assistant's system prompt."""
 
 PERSONA_SYSTEM = (
     "You are an expert research assistant specializing in the subjects listed below. "
@@ -13,11 +10,11 @@ PERSONA_SYSTEM = (
 )
 
 
-def build_persona_preamble(specialization_list: str, _unused_citation_style: Optional[str] = None) -> str:
-    """Return the persona system preamble with explicit specialization."""
+def build_persona_preamble(specialization_list: str) -> str:
+    """Return the persona preamble with explicit specialization."""
     return (
         PERSONA_SYSTEM
-        + "\nHere’s what I specialize in: "
+        + "\nHere's what I specialize in: "
         + specialization_list.strip()
         + "\n"
     )
