@@ -10,12 +10,17 @@ import argparse
 import csv
 import json
 import os
-import re
 import statistics
 import sys
 from importlib import import_module
 from pathlib import Path
 from typing import Iterable, List, Mapping, MutableMapping, Sequence
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from utils.textproc import compute_overlap_ratio, concat_context as _concat_context, tokenize as _tokenize
 
 
 def load_eval_data(filepath: Path) -> List[Mapping[str, str]]:
@@ -39,12 +44,6 @@ def load_eval_data(filepath: Path) -> List[Mapping[str, str]]:
         return out
 
 
-def _tokenize(text: str) -> List[str]:
-    if not text:
-        return []
-    return re.findall(r"\w+", text.lower())
-
-
 def _normalise_context(context: Iterable[str] | str | None) -> List[str]:
     """Return a list of context strings, tolerating CSV/JSON encodings."""
 
@@ -55,28 +54,6 @@ def _normalise_context(context: Iterable[str] | str | None) -> List[str]:
     if isinstance(context, tuple):
         return [str(item) for item in context]
     return [str(context)]
-
-
-def _concat_context(context: Iterable[str]) -> str:
-    return " ".join(part for part in context if part)
-
-
-def compute_overlap_ratio(answer: str, context: Iterable[str]) -> float:
-    """Compute lexical overlap between an answer and its supporting context.
-
-    This helper keeps the overlap calculation reusable so we can log the exact
-    ratio alongside the boolean faithfulness flag. Explicit metrics help decide
-    whether a prompt tweak moved us in the right direction.
-    """
-
-    answer_tokens = _tokenize(answer)
-    if not answer_tokens:
-        return 0.0
-    ctx_tokens = set(_tokenize(_concat_context(context)))
-    if not ctx_tokens:
-        return 0.0
-    match = sum(1 for token in answer_tokens if token in ctx_tokens)
-    return match / max(1, len(answer_tokens))
 
 
 def is_faithful(answer: str, context: Iterable[str], threshold: float = 0.3) -> bool:
@@ -214,7 +191,7 @@ def generate_predictions(
     llm_model: str,
     provider: str,
     api_key: str | None,
-    temperature: float,
+    temperature: float | None,
     max_tokens: int,
     base_url: str | None,
 ) -> List[Mapping[str, object]]:
@@ -295,10 +272,10 @@ def main() -> None:
     parser.add_argument("--agent-mode", choices=["none", "pretend", "llm"], default="pretend", help="Answering strategy")
     parser.add_argument("--k", type=int, default=3, help="Number of contexts to retrieve when generating predictions")
     parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2", help="Embedding model name")
-    parser.add_argument("--llm-model", default="gpt-5-mini", help="Chat model name when --agent-mode llm is used")
+    parser.add_argument("--llm-model", default=None, help="Chat model name when --agent-mode llm is used (defaults to the resolved provider's default model)")
     parser.add_argument("--provider", default=None, help="LLM provider override (auto-detected from API keys if not specified)")
     parser.add_argument("--api-key", dest="api_key", help="API key override (auto-detected from environment if not specified)")
-    parser.add_argument("--temperature", type=float, default=0.2, help="Chat model temperature")
+    parser.add_argument("--temperature", type=float, default=None, help="Chat model temperature (omitted unless set)")
     parser.add_argument("--max-tokens", type=int, default=2000, help="Chat model max tokens")
     parser.add_argument("--base-url", dest="base_url", help="Optional OpenAI-compatible base URL")
     parser.add_argument("--rebuild-index", action="store_true", help="Run scripts/01_build_index.py before evaluation")
@@ -328,8 +305,8 @@ def main() -> None:
             k=args.k,
             agent_mode=args.agent_mode,
             model_name=args.model,
-            llm_model=args.llm_model,
-            provider=args.provider,
+            llm_model=query_module.resolve_model(provider, args.llm_model),
+            provider=provider,
             api_key=api_key,
             temperature=args.temperature,
             max_tokens=args.max_tokens,

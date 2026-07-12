@@ -1,5 +1,4 @@
 # Orchestration & env
-langchain
 langchain-core
 langchain-community
 langchain-text-splitters
@@ -17,14 +16,8 @@ unstructured
 transformers
 sentence-transformers
 
-# Cloud LLMs (choose one or more)
+# Cloud LLMs (all three providers are installed by default; trim to taste)
 langchain-openai
 openai
-
-# Optional: Google Gemini support
-# Uncomment to use Gemini models (gemini-pro, gemini-1.5-pro, gemini-1.5-flash, etc.)
 langchain-google-genai
-
-# Optional: Anthropic Claude support
-# Uncomment to use Claude models (claude-3-opus, claude-3-5-sonnet, claude-3-haiku, etc.)
 langchain-anthropic

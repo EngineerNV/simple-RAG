@@ -1,3 +1,10 @@
+# =============================================================================
+# TEMPLATE ONLY — this file is NOT loaded by any code in this repository.
+# It exists as a learning scaffold for prompt-engineering experiments.
+# The real prompts live in code: agent_orchestration_helper.build_system_prompt
+# (persona + grounding rules) and scripts/02_query.py SYSTEM_PROMPT.
+# =============================================================================
+
 # prompts.yaml
 # This file is for storing prompt templates for your RAG pipeline.
 # Use this to experiment with prompt engineering and see how different prompts affect your results.

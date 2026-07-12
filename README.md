@@ -30,7 +30,7 @@ The query script offers three modes:
 |-----------|------------------------------------------------------------------------------------------------------|
 | `none`    | Retrieve contexts and print a stitched answer using retrieved text only (no LLM call).              |
 | `pretend` | Preview the system prompt, retrieved snippets, and a templated final answer with citations.         |
-| `llm`     | Call a live chat model (OpenAI-compatible) using the retrieved contexts as evidence.                |
+| `llm`     | Call a live chat model (OpenAI, Gemini, or Claude) using the retrieved contexts as evidence.         |
 
 ## Environment and API keys
 
@@ -57,7 +57,9 @@ These scripts load environment variables (from your process and from a `.env` fi
 
 **How auto-detection works:**
 
-The scripts check for API keys in order (OPENAI → GOOGLE → ANTHROPIC). The first key found determines the provider. If you have multiple keys set and want to use a specific provider, use the `--provider` flag to override.
+The scripts check for API keys in order (OPENAI → GOOGLE → ANTHROPIC). The first key found determines the provider. If you have multiple keys set and want to use a specific provider, use the `--provider` flag to override — the key for that provider's own environment variable is used.
+
+**Default models:** when `--llm-model` is not given, each provider falls back to its own default (`utils/llm.py:DEFAULT_MODELS`): `gpt-5-mini` for OpenAI, `gemini-2.5-flash` for Gemini, and `claude-sonnet-4-5` for Claude. This means a Claude-only or Gemini-only environment works out of the box without passing a model name.
 
 **Example usage:**
 
@@ -86,9 +88,12 @@ python scripts/02_query.py -q "Test" --agent-mode llm --api-key "sk-..." --provi
 **Retriever/ingest configuration via environment:**
 
 - `CORPUS_DIR` — overrides the input folder for `scripts/00_ingest.py` (default: `data/corpus`). Use this in your `.env`.
+- `CHROMA_DB_PATH` — overrides where the Chroma index is stored and read (default: `data/chroma`).
 - `INGEST_TIKTOKEN_MODEL` — tokenizer model name for token-aware chunking (default: `text-embedding-3-small`).
 - `INGEST_CHUNK_SIZE` — approximate chunk size in tokens (default: `400`).
 - `INGEST_CHUNK_OVERLAP` — token overlap between adjacent chunks (default: `80`).
+
+The full configuration surface is: these `.env` variables, per-script CLI flags (`--help` on any script), and `rag_content.json` for the chat agent's scope. The YAML files under `configs/` are unused learning templates (see the header comment in each).
 
 Note: The agentic CLI and helper functions reuse the same chat model key; there are no additional secrets required beyond the LLM API key.## Project structure
 
@@ -98,13 +103,14 @@ Note: The agentic CLI and helper functions reuse the same chat model key; there 
 | `scripts/01_build_index.py` | Embeds the ingested chunks with `HuggingFaceEmbeddings`, rebuilds `data/chroma/`, and prints a build summary. |
 | `scripts/02_query.py` | Connects to the persisted Chroma store and exposes the retrieval CLI described above. |
 | `scripts/03_eval.py` | Scores saved question/answer/context rows with lexical heuristics and prints aggregate metrics. |
-| `scripts/03_quiz.py` | Interactive reviewer loop for collecting human judgements (faithful/abstain/tags). |
+| `scripts/06_quiz.py` | Interactive reviewer loop for collecting human judgements (faithful/abstain/tags). |
 | `scripts/04_llm_api.py` | Standalone helper for formatting prompts and calling a chat model with optional context snippets. |
-| `scripts/05_chat_cli.py` | SIMPLE_RAG chat experience with RAG decider, query rewriting, persona prompts, and a progress spinner. |
-| `agent_orchestration_helper.py` | Shared helpers for the SIMPLE_RAG CLI (topic inventory, structured decider/rewriter, fallback payload builder). |
+| `scripts/05_chat_cli.py` | SIMPLE_RAG chat experience: one structured router call per turn, grounded prompting, persona system prompt, and a progress spinner. |
+| `agent_orchestration_helper.py` | Chat orchestration: the router (scope + retrieval + query rewrite in one call), the system prompt/evidence contract, and the testable `ChatSession` turn handler. |
 | `scripts/report.py` | Aggregates quiz results into a Markdown summary. |
-| `configs/` | Starter YAML files for prompts and retrieval parameters—update as you extend the project. |
-| `data/` | Storage root. `corpus/` holds your source files; `chroma/` stores the persisted vector index. |
+| `utils/` | Shared modules: `llm.py` (providers/models/factory), `settings.py`, `textproc.py`, `chat_history.py`, persona/rejection helpers. |
+| `configs/` | **Unused YAML templates** kept as learning scaffolds — nothing loads them; real config is `.env` + CLI flags + `rag_content.json`. |
+| `data/` | Storage root. `corpus/` holds your source files; `chroma/` is created by `01_build_index.py` for the persisted vector index. |
 
 ## Running the CLI tools
 
@@ -139,18 +145,17 @@ Each CLI includes `--help` for a full list of options, including custom embeddin
 
 `scripts/05_chat_cli.py` behaves like a cheerful teammate:
 
-- **Decide → Rewrite → Retrieve:** every turn runs a structured decider to see whether the question falls within the archive topics, optionally rewrites the query for cosine search, and fetches supporting snippets. A Rich status spinner keeps the user informed while the agent is “thinking.”
-- **Friendly persona:** when contexts exist, SIMPLE_RAG talks about what it just looked up and cites snippets as `[source #]`. If nothing relevant is found but the question is on theme, it gives a short background answer from its own knowledge; truly off-topic prompts are deflected with gentle suggestions that align with the archive.
-- **Shared orchestration helpers:** all of the routing logic, inventory text, and fallbacks live in `agent_orchestration_helper.py`, keeping the CLI tidy and making it easy to reuse the same behaviour elsewhere.
+- **One router call per turn:** a single structured LLM call decides whether the request is in scope, whether retrieval would help, and what standalone query to search with (anaphora like "its evolution" resolved from history). This replaced three separate gate/decider/rewriter calls, roughly halving per-turn latency and cost. If the router fails or is unsure, the turn falls back to retrieve-and-abstain rather than passing content through ungated.
+- **Grounded prompting:** the persona and grounding rules live in a byte-stable system prompt (friendly to provider prompt caching). Retrieved chunks are delimited in `<documents>` tags and explicitly marked as evidence-not-instructions, with an abstention rule ("I don't have that in my notes") instead of invented facts.
+- **Clean memory:** conversation history stores only your actual messages — retrieval dumps never pollute the rolling summary. An LLM error mid-turn shows an apology and keeps the session alive.
+- **Shared orchestration helpers:** the routing logic, prompt contract, and turn handling live in `agent_orchestration_helper.py` (`ChatSession`), keeping the CLI a thin rendering shell that's easy to test offline (see `tests/test_chat_session.py`).
 
 ## Data directory layout
 
-The repository ships empty placeholders for the directories referenced in the docs:
-
 ```text
 data/
-├── chroma/   # persisted Chroma collections created by 01_build_index.py
-├── corpus/   # drop your markdown or text sources here
+├── chroma/   # persisted Chroma collections — created by 01_build_index.py on first run
+├── corpus/   # drop your markdown or text sources here (a sample Pokémon.MD ships with the repo)
 └── README.md
 ```
 
@@ -230,9 +235,9 @@ Contexts:
 
 This keeps the LLM grounded and makes it easy to attribute facts to specific chunks.
 
-## CLI agent flow: decide → (rewrite) → retrieve → respond
+## CLI agent flow: route → retrieve → respond
 
-The chat CLI (`scripts/05_chat_cli.py`) adds a small agentic loop that decides when to use RAG, optionally rewrites the query, retrieves contexts, and answers with citations.
+The chat CLI (`scripts/05_chat_cli.py`) runs a small agentic loop with a single routing decision per turn.
 
 ASCII flow:
 
@@ -240,33 +245,26 @@ ASCII flow:
 User Input
    |
    v
-[Topic Gate] -- off-topic? --> [Polite Rejection]
+[Router (one structured call)]
+   |-- off-topic? --------------> [Polite Rejection]
+   |-- on-topic, no RAG needed -> [Direct Answer (no retrieval)]
    |
-   v
-[RAG Decider] -- no --> [Direct Answer (no RAG)]
-   |
-   v
-[Query Rewriter] -> rewritten query
-   |
-   v
+   v  on-topic + RAG (with rewritten search_query)
 [Retriever (Chroma + embeddings)]
    |
    v
-[Reranker (blended score)]
+[<documents> evidence block + byte-stable system prompt + LLM]
    |
    v
-[Compose Prompt + LLM]
-   |
-   v
-[Answer + cited contexts]
+[Grounded answer (abstains when evidence is insufficient)]
 ```
 
 Key components:
 
-- Topic gate (see `utils/topic_gate.py`): classifies whether the request is within scope.
-- RAG decider and query rewriter (see `agent_orchestration_helper.py`): structured helpers that determine whether to use retrieval and produce a cleaner search query when helpful.
+- Router (`agent_orchestration_helper.route_turn`): one structured call that classifies scope, decides on retrieval, and rewrites the search query. Low confidence or a router error falls back to retrieve-and-abstain.
 - Retriever: uses the built vector store (`data/chroma`) with `HuggingFaceEmbeddings`.
-- Reranker: combines retriever score and lexical overlap to refine ordering.
+- Prompt contract (`build_system_prompt` / `format_context_documents`): persona + grounding rules in the system layer; evidence delimited as untrusted `<documents>` data in the current turn only.
+- Turn handler (`ChatSession.handle_turn`): retrieval failures degrade gracefully, LLM failures keep the session alive, and history stays clean.
 
 ## Testing: run the test suite with pytest
 
@@ -313,21 +311,24 @@ python scripts/02_query.py -q "Who is Blackpink?" --agent-mode pretend
 
 ## Utilities overview (utils/)
 
-These small helpers keep prompting, persona, and gating logic tidy and reusable:
+These shared modules keep the pipeline scripts and chat orchestration tidy:
 
+- `utils/llm.py` — Provider auto-detection, per-provider default models, and the single chat-model factory used by every script.
+- `utils/settings.py` — Filesystem defaults (`CHROMA_DB_PATH`-aware Chroma directory, embedding model name).
+- `utils/textproc.py` — Snippet cleaning, metadata formatting, and lexical-overlap helpers shared by query/eval/quiz.
+- `utils/chat_history.py` — `SummaryBufferHistory`: rolling-summary conversation memory with a token budget.
 - `utils/inventory_view.py` — Deduplicates and formats specialization topics into a readable one-liner.
-- `utils/persona.py` — Builds the persona preamble that’s prepended to the user prompt.
+- `utils/persona.py` — The persona text used in the chat system prompt.
 - `utils/rejections.py` — Generates brief on-topic refusals (structured output via the LLM) when requests are out of scope.
-- `utils/text_sanitize.py` — Optionally removes suggestion-style text from outputs (to keep answers concise).
-- `utils/topic_gate.py` — A small classifier that decides if a request is on-topic; can enforce a minimum confidence.
+- `utils/warnings_filter.py` — One home for the LangChain deprecation-warning filters.
 
-The chat CLI wires these together with the structured decider/rewriter in `agent_orchestration_helper.py`.
+The chat CLI wires these together with the router and `ChatSession` in `agent_orchestration_helper.py`.
 
 ## Topic scope and updating inventory (rag_content.json)
 
 You control what the agent “specializes” in via the JSON file next to the code: `rag_content.json`.
 
-- `rag_topic_inventory` — Multi-line description of what the archive covers. Used by the decider/rewriter for context.
+- `rag_topic_inventory` — Multi-line description of what the archive covers. Used by the router when deciding whether to retrieve.
 - `specialization_topics` — A list of plain-text topics that are rendered into the persona and shown in refusals.
 
 Editing this file immediately updates what the CLI considers in-scope (no code changes needed). For example:
@@ -345,8 +346,7 @@ Editing this file immediately updates what the CLI considers in-scope (no code c
 
 The agent will then:
 
-- Gate off-topic requests (via `utils/topic_gate.py`).
-- Prefer retrieval for questions that overlap the inventory (via the structured decider in `agent_orchestration_helper.py`).
+- Gate off-topic requests and prefer retrieval for questions that overlap the inventory (via the router in `agent_orchestration_helper.py`).
 - Phrase the persona and refusals using your `specialization_topics`.
 
 ## Content format and ingestion

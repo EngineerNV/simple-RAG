@@ -1,3 +1,12 @@
+# =============================================================================
+# TEMPLATE ONLY — this file is NOT loaded by any code in this repository.
+# It exists as a learning scaffold for sketching out a config-driven pipeline.
+# The real configuration surface is:
+#   - .env variables (see .env.example): CORPUS_DIR, CHROMA_DB_PATH, INGEST_*
+#   - CLI flags on each script (--llm-model, --provider, --retrieval-k, ...)
+#   - rag_content.json (chat scope: topic inventory + specialization list)
+# =============================================================================
+
 # rag.yaml
 # This file is a template for configuring your Retrieval-Augmented Generation (RAG) pipeline.
 # Fill in the values as you experiment with different settings.

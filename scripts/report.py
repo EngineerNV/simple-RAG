@@ -1,6 +1,6 @@
 """Summarise human quiz annotations into console and Markdown snapshots.
 
-This optional helper ingests JSONL/CSV files produced by ``03_quiz.py`` and
+This optional helper ingests JSONL/CSV files produced by ``06_quiz.py`` and
 prints an easy-to-skim digest (coverage, faithfulness/abstention trends, tag
 frequencies) before emitting a lightweight Markdown report. The intent is to
 keep post-quiz analysis approachable while leaving room for teams to build
@@ -54,7 +54,7 @@ def load_datasets(paths: Sequence[Path]) -> List[MutableMapping[str, object]]:
         elif path.suffix.lower() == ".csv":
             records.extend(load_csv(path))
         else:
-            raise ValueError(f"Unsupported file extension for {path}. Use JSONL or CSV from 03_quiz.py")
+            raise ValueError(f"Unsupported file extension for {path}. Use JSONL or CSV from 06_quiz.py")
     return records
 
 
@@ -239,7 +239,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Define CLI arguments so teams can point at their exported quiz files."""
 
     parser = argparse.ArgumentParser(description="Summarise human quiz annotations")
-    parser.add_argument("--in", dest="inputs", nargs="+", required=True, help="JSONL/CSV files from 03_quiz.py")
+    parser.add_argument("--in", dest="inputs", nargs="+", required=True, help="JSONL/CSV files from 06_quiz.py")
     parser.add_argument("--out", default="reports/human_eval_report.md", help="Markdown report destination")
     return parser.parse_args(argv)
 

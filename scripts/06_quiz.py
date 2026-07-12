@@ -1,4 +1,4 @@
-"""03_quiz.py — interactive human metrics checklist for retrieval answers.
+"""06_quiz.py — interactive human metrics checklist for retrieval answers.
 
 The quiz mirrors the behaviour of :mod:`scripts.02_query` so reviewers can see
 exactly what the application would have returned. It focuses on three goals:
@@ -23,61 +23,25 @@ import csv
 import json
 import os
 import random
-import re
 import sys
 import textwrap
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib import import_module
-import warnings
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
-# Suppress noisy deprecation warnings without changing packages.
-try:  # Best-effort: some environments provide this warning class
-    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
-    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
-except Exception:
-    # Fallback to message-based filters if the class isn't importable
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*HuggingFaceEmbeddings.*was deprecated.*",
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*manual persistence method is no longer supported.*",
-    )
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
+from utils.textproc import compute_overlap_ratio
+from utils.warnings_filter import suppress_langchain_warnings
 
-# -- Lightweight lexical overlap helper -----------------------------------------------------
-
-
-def _tokenize(text: str) -> List[str]:
-    if not text:
-        return []
-    return re.findall(r"\w+", text.lower())
-
-
-def _concat_context(parts: Iterable[str]) -> str:
-    return " ".join(segment for segment in parts if segment)
-
-
-def compute_overlap_ratio(answer: str, context_parts: Iterable[str]) -> float:
-    """Return lexical overlap ratio between the answer and joined contexts."""
-
-    if not answer:
-        return 0.0
-    answer_tokens = _tokenize(answer)
-    if not answer_tokens:
-        return 0.0
-    context_tokens = set(_tokenize(_concat_context(context_parts)))
-    if not context_tokens:
-        return 0.0
-    matches = sum(1 for token in answer_tokens if token in context_tokens)
-    return matches / max(1, len(answer_tokens))
+suppress_langchain_warnings()
 
 
 # -- Question loading and persistence -------------------------------------------------------
@@ -240,7 +204,7 @@ def generate_answer(
     provider: str,
     llm_model: str,
     api_key: str | None,
-    temperature: float,
+    temperature: float | None,
     max_tokens: int,
     base_url: str | None,
 ) -> str:
@@ -302,7 +266,7 @@ def build_review_record(
     provider: str,
     llm_model: str,
     api_key: str | None,
-    temperature: float,
+    temperature: float | None,
     max_tokens: int,
     base_url: str | None,
 ) -> ReviewRecord:
@@ -582,11 +546,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Answer generation strategy",
     )
     parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2", help="Embedding model name")
-    parser.add_argument("--llm-model", default="gpt-5-mini", help="Chat model name for llm mode")
+    parser.add_argument("--llm-model", default=None, help="Chat model name for llm mode (defaults to the resolved provider's default model)")
     parser.add_argument("--provider", default=None, help="LLM provider override (auto-detected from API keys if not specified)")
     parser.add_argument("--api-key", dest="api_key", help="API key override (auto-detected from environment if not specified)")
     parser.add_argument("--base-url", dest="base_url", help="Optional OpenAI-compatible base URL")
-    parser.add_argument("--temperature", type=float, default=0.2, help="LLM sampling temperature")
+    parser.add_argument("--temperature", type=float, default=None, help="LLM sampling temperature (omitted unless set)")
     parser.add_argument("--max-tokens", type=int, default=2000, help="LLM max tokens")
     parser.add_argument("--out", default="data/human_review.jsonl", help="Output JSONL path")
     parser.add_argument("--resume", action="store_true", help="Resume from existing output")
@@ -660,7 +624,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             agent_mode=args.agent_mode,
             k=args.k,
             provider=provider,
-            llm_model=args.llm_model,
+            llm_model=query_module.resolve_model(provider, args.llm_model),
             api_key=api_key,
             temperature=args.temperature,
             max_tokens=args.max_tokens,

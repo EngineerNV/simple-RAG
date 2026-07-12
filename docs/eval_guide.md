@@ -1,6 +1,6 @@
 # Human Evaluation Guide
 
-This guide explains how to capture human feedback with `scripts/03_quiz.py`,
+This guide explains how to capture human feedback with `scripts/06_quiz.py`,
 understand the saved JSONL/CSV fields, and turn the lightweight report from
 `scripts/report.py` into concrete retrieval or prompting changes. The commands
 below reflect the current CLI options exposed by the repository.
@@ -28,7 +28,7 @@ Launch the reviewer loop with the same retrieval/LLM settings you ship in the
 application:
 
 ```bash
-python scripts/03_quiz.py \
+python scripts/06_quiz.py \
   --questions data/questions/dev.json \
   --agent-mode pretend \
   --k 3 \

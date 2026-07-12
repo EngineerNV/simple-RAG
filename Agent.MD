@@ -56,20 +56,23 @@ Core pipeline (numbered in run order):
 
 4) `scripts/03_eval.py` — lexical heuristics over saved rows (faithfulness/abstain).
 
-5) `scripts/03_quiz.py` + `scripts/report.py` — collect human judgements and summarize.
+5) `scripts/06_quiz.py` + `scripts/report.py` — collect human judgements and summarize.
 
 6) `scripts/04_llm_api.py` — prompt assembly and LLM smoke test with usage display.
 
-7) `scripts/05_chat_cli.py` — interactive chat agent: topic gate → RAG decider → optional rewrite → retrieve → rerank → compose → answer. Shows contexts when `--show-context`.
+7) `scripts/05_chat_cli.py` — interactive chat agent: one router call (scope + retrieval decision + query rewrite) → retrieve → grounded answer. Shows contexts when `--show-context`.
 
 Agent orchestration and utils:
 
-- `agent_orchestration_helper.py` — loads topic inventory from `rag_content.json`; builds structured decider/rewriter; assembles user payloads (with persona) for the LLM.
+- `agent_orchestration_helper.py` — loads topic inventory from `rag_content.json`; the structured router (`route_turn`), the prompt contract (`build_system_prompt`, `format_context_documents`), and the testable `ChatSession` turn handler.
+- `utils/llm.py` — provider auto-detection, per-provider default models (`DEFAULT_MODELS`), and the single chat-model factory shared by all scripts.
+- `utils/settings.py` — `CHROMA_DB_PATH`-aware Chroma directory and embedding defaults.
+- `utils/textproc.py` — snippet cleaning / metadata formatting / lexical-overlap helpers.
+- `utils/chat_history.py` — `SummaryBufferHistory` rolling-summary conversation memory.
 - `utils/inventory_view.py` — formats specialization topics.
-- `utils/persona.py` — persona preamble builder.
+- `utils/persona.py` — persona text used in the chat system prompt.
 - `utils/rejections.py` — structured off-topic refusals.
-- `utils/text_sanitize.py` — suggestion filtering.
-- `utils/topic_gate.py` — on-topic classifier with a confidence floor.
+- `utils/warnings_filter.py` — shared LangChain deprecation-warning filters.
 
 Data/config:
 
@@ -81,7 +84,7 @@ Data/config:
 
 Scope is defined in `rag_content.json`:
 
-- `rag_topic_inventory` (multi-line description) guides the decider/rewriter.
+- `rag_topic_inventory` (multi-line description) guides the router's retrieval decision.
 - `specialization_topics` (list) appear in the persona and refusals.
 
 Content format: keep it simple — only Markdown (`.md`) files are supported for ingestion today. The ingester uses a tiktoken-aware splitter with overlap. For very small files, it may use H2 headings to create multiple chunks (so tests and UX see more than one chunk when structure exists).
@@ -95,7 +98,7 @@ Content format: keep it simple — only Markdown (`.md`) files are supported for
 
 ## CLI agent loop (chat)
 
-Flow: topic gate → RAG decider → (optional) rewrite → retrieve → rerank → compose → LLM → answer. The structured helpers are in `agent_orchestration_helper.py`; the topic gate lives in `utils/topic_gate.py`.
+Flow: router (one structured call: scope + use-RAG + rewritten search query) → retrieve → grounded LLM answer. Off-topic requests get a structured refusal; low router confidence or a router error falls back to retrieve-and-abstain. All of it lives in `agent_orchestration_helper.py` (`route_turn`, `ChatSession`); the CLI is a thin rendering shell. Offline behaviour tests: `tests/test_chat_session.py`.
 
 Useful flags:
 
@@ -104,7 +107,7 @@ Useful flags:
 
 ## Logging and warnings
 
-- Do not change packages for deprecation churn. We suppress common LangChain deprecation warnings across scripts using `warnings.filterwarnings` while keeping imports stable.
+- Do not change packages for deprecation churn. Common LangChain deprecation warnings are suppressed via `utils.warnings_filter.suppress_langchain_warnings()` — call it instead of copy-pasting filter blocks.
 - Keep outputs user-friendly; when adding logs, prefer concise one-liners and preserve current phrasing that tests assert on (e.g., “Documents embedded”).
 
 ## Tests and dev tooling
