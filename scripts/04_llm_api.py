@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import argparse  # Parse CLI arguments for quick smoke tests
 import json  # Allow CLI users to pass context snippets via JSON payloads
-import os  # Access environment variables for API keys and configuration
 import time  # Capture latency metrics for reporting
 from pathlib import Path  # Load context snippets from files during CLI tests
 import sys
-import warnings
 from typing import Iterable, Optional  # Type hints for prompt assembly and inputs
 
 try:  # Optional dependency for local development convenience.
@@ -33,152 +31,35 @@ from langchain_core.language_models.chat_models import (  # Provide a common int
 from langchain_core.messages import AIMessage  # Represent the structured response returned by chat models
 from langchain_core.prompts import ChatPromptTemplate  # Build message templates for question + context prompts
 
-DEFAULT_MODEL_NAME = "gpt-3.5-turbo"
+from utils.llm import (
+    load_chat_model,
+    resolve_model,
+    resolve_provider_and_key,
+)
+from utils.warnings_filter import suppress_langchain_warnings
 
-
-# Suppress noisy deprecation warnings without changing packages.
-try:  # Best-effort: some environments provide this warning class
-    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
-    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
-except Exception:
-    # Fallback to message-based filters if the class isn't importable
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*HuggingFaceEmbeddings.*was deprecated.*",
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*manual persistence method is no longer supported.*",
-    )
-
-def auto_detect_provider() -> tuple[str, str] | None:
-    """Auto-detect provider based on which API key is set.
-    
-    Returns:
-        (provider_name, api_key) tuple or None if no key found.
-    """
-    if os.environ.get("OPENAI_API_KEY"):
-        return ("openai", os.environ["OPENAI_API_KEY"])
-    if os.environ.get("GOOGLE_API_KEY"):
-        return ("gemini", os.environ["GOOGLE_API_KEY"])
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return ("claude", os.environ["ANTHROPIC_API_KEY"])
-    return None
-
-
-def resolve_provider_and_key(explicit_key: str | None, provider_hint: str | None) -> tuple[str, str | None]:
-    """Resolve the provider and API key from explicit args or environment.
-    
-    Args:
-        explicit_key: Explicit --api-key override
-        provider_hint: Explicit --provider override
-        
-    Returns:
-        (provider, api_key) tuple
-    """
-    # If both explicit values provided, use them
-    if explicit_key and provider_hint:
-        return (provider_hint, explicit_key)
-    
-    # If only explicit key, need to detect provider
-    if explicit_key:
-        if provider_hint:
-            return (provider_hint, explicit_key)
-        # Try to auto-detect from env vars as fallback
-        detected = auto_detect_provider()
-        return (detected[0], explicit_key) if detected else ("openai", explicit_key)
-    
-    # Auto-detect from environment
-    detected = auto_detect_provider()
-    if detected:
-        # If provider_hint given, respect it but use auto-detected key
-        if provider_hint:
-            return (provider_hint, detected[1])
-        return detected
-    
-    # No key found anywhere
-    return (provider_hint or "openai", None)
-
-
-def load_api_key(env_var: str = "OPENAI_API_KEY") -> str:
-    """Fetch the LLM API key from the environment.
-
-    Raise a helpful error when the key is missing so the caller knows to set up
-    their ``.env`` file or export the variable manually.
-    """
-
-    api_key = os.environ.get(env_var)
-    if not api_key:
-        raise RuntimeError(
-            f"Set the {env_var} environment variable before calling the LLM."
-        )
-    return api_key
+suppress_langchain_warnings()
 
 
 def build_llm_client(
     api_key: str,
-    model_name: str = DEFAULT_MODEL_NAME,
+    model_name: str,
     *,
-    temperature: float = 0.2,
+    temperature: float | None = None,
     max_tokens: int = 2000,
     base_url: Optional[str] = None,
     provider: str = "openai",
 ) -> BaseChatModel:
-    """Instantiate your provider's chat client with the supplied key."""
+    """Instantiate the provider's chat client (thin wrapper over utils.llm)."""
 
-    provider = provider.lower()
-    
-    if provider == "openai":
-        try:
-            from langchain_openai import ChatOpenAI
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "Missing optional dependency 'langchain-openai'. Install it with `pip install langchain-openai`."
-            ) from exc
-        init_kwargs = {
-            "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "openai_api_key": api_key,
-        }
-        if base_url:
-            init_kwargs["openai_api_base"] = base_url
-        return ChatOpenAI(**init_kwargs)
-    
-    elif provider == "gemini":
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "Missing optional dependency 'langchain-google-genai'. Install it with `pip install langchain-google-genai`."
-            ) from exc
-        init_kwargs = {
-            "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "google_api_key": api_key,
-        }
-        return ChatGoogleGenerativeAI(**init_kwargs)  # type: ignore
-    
-    elif provider == "claude" or provider == "anthropic":
-        try:
-            from langchain_anthropic import ChatAnthropic  # type: ignore
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "Missing optional dependency 'langchain-anthropic'. Install it with `pip install langchain-anthropic`."
-            ) from exc
-        init_kwargs = {
-            "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "anthropic_api_key": api_key,
-        }
-        return ChatAnthropic(**init_kwargs)  # type: ignore
-    
-    else:
-        raise RuntimeError(
-            f"Unsupported provider '{provider}'. Supported: openai, gemini, claude (anthropic)."
-        )
+    return load_chat_model(
+        provider=provider,
+        model_name=model_name,
+        api_key=api_key,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        base_url=base_url,
+    )
 
 
 def assemble_prompt(
@@ -284,9 +165,9 @@ def main() -> None:
     )
     parser.add_argument("--instructions", help="Override the system prompt")
     parser.add_argument("--api-key", dest="api_key", help="Explicit API key override (auto-detected if not specified)")
-    parser.add_argument("--model", default=DEFAULT_MODEL_NAME, help="Chat model identifier")
+    parser.add_argument("--model", default=None, help="Chat model identifier (defaults to the resolved provider's default model)")
     parser.add_argument("--provider", default=None, help="LLM provider override (auto-detected from API keys if not specified)")
-    parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature")
+    parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature (omitted unless set)")
     parser.add_argument("--max-tokens", type=int, default=2000, help="Maximum tokens for the response")
     parser.add_argument("--base-url", dest="base_url", help="Optional custom base URL for OpenAI-compatible APIs")
     args = parser.parse_args()
@@ -303,7 +184,7 @@ def main() -> None:
 
     client = build_llm_client(
         api_key=api_key,
-        model_name=args.model,
+        model_name=resolve_model(provider, args.model),
         provider=provider,
         temperature=args.temperature,
         max_tokens=args.max_tokens,

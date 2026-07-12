@@ -75,7 +75,6 @@ def test_persist_chroma_sanitizes_metadata(monkeypatch: pytest.MonkeyPatch, tmp_
     store = build_index.persist_chroma(docs, DummyEmbeddings())
 
     assert isinstance(store, FakeChroma)
-    assert store.persist_called
     assert all(isinstance(md["tags"], str) for md in store.metadatas if "tags" in md)
     assert chroma_dir.exists()
     assert build_index._RUN_METADATA["doc_count"] == len(docs)

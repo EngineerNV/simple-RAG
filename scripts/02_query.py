@@ -10,7 +10,7 @@ your index before integrating richer agents.
 from __future__ import annotations
 
 import argparse
-import os
+import logging
 # Optional dependency; fall back to a no-op when not installed.
 try:
     from dotenv import load_dotenv
@@ -24,25 +24,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Sequence, Tuple
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-# Suppress noisy deprecation warnings without changing packages.
-try:  # Best-effort: some environments provide this warning class
-    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
-    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
-except Exception:
-    # Fallback to message-based filters if the class isn't importable
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*HuggingFaceEmbeddings.*was deprecated.*",
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*manual persistence method is no longer supported.*",
-    )
+from utils import settings
+from utils.llm import (
+    LLMInvocationError,
+    MissingAPIKeyError,
+    MissingProviderDependencyError,
+    UnsupportedProviderError,
+    auto_detect_provider,
+    load_chat_model,
+    resolve_model,
+    resolve_provider_and_key,
+)
+from utils.textproc import clean_snippet, format_metadata
+from utils.warnings_filter import suppress_langchain_warnings
+
+suppress_langchain_warnings()
+
+logger = logging.getLogger(__name__)
 
 """
 This script provides a minimal, runnable retrieval smoke-test so you can see the
@@ -54,9 +61,8 @@ The implementation intentionally keeps the agent light-weight so it runs in
 offline environments and is easy to extend to call a real chat model later.
 """
 
-DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_LLM_MODEL = "gpt-5-mini"
-CHROMA_DIR = Path("data") / "chroma"
+DEFAULT_MODEL_NAME = settings.DEFAULT_EMBED_MODEL
+CHROMA_DIR = settings.CHROMA_DIR
 SYSTEM_PROMPT = (
     "Answer ONLY using the provided contexts. If unknown, say you don't know. "
     "Cite as [source N]."
@@ -64,22 +70,6 @@ SYSTEM_PROMPT = (
 
 RetrieverResult = List[Tuple[Document, float | None]]
 load_dotenv()
-
-
-class MissingAPIKeyError(RuntimeError):
-    """Raised when an LLM call is requested without an API key."""
-
-
-class LLMInvocationError(RuntimeError):
-    """Raised when the underlying LLM client fails to produce a response."""
-
-
-class UnsupportedProviderError(RuntimeError):
-    """Raised when an unknown LLM provider identifier is supplied."""
-
-
-class MissingProviderDependencyError(RuntimeError):
-    """Raised when a provider-specific dependency is unavailable."""
 
 
 @dataclass
@@ -108,20 +98,6 @@ def create_retrieval_store(
     embed = HuggingFaceEmbeddings(model_name=model_name)
     store = load_vector_store(persist_dir, embed)
     return embed, store
-
-
-def clean_snippet(text: str) -> str:
-    stripped = text.strip()
-    if not stripped:
-        return ""
-    return " ".join(stripped.split())
-
-
-def format_metadata(metadata: dict | None) -> str:
-    if not metadata:
-        return "metadata: none"
-    parts = [f"{key}={value}" for key, value in metadata.items()]
-    return "metadata: " + ", ".join(parts)
 
 
 def retrieve_contexts(store: Chroma, question: str, k: int) -> RetrieverResult:
@@ -201,8 +177,8 @@ def rerank_results(results: RetrieverResult, question: str, alpha: float = 0.5) 
             md["lexical_overlap"] = round(lexical, 4)
             md["retriever_norm"] = round(retriever_norm, 4)
             doc.metadata = md
-        except Exception:
-            pass
+        except AttributeError:  # frozen Document implementations
+            logger.debug("Could not attach rerank scores to document metadata.")
         reranked.append(((doc, score), combined))
 
     reranked_sorted = sorted(reranked, key=lambda x: x[1], reverse=True)
@@ -227,11 +203,7 @@ def emit_contexts(
         snippet = clean_snippet(doc.page_content)
         score_display = f"{score:.3f}" if score is not None else "n/a"
         # Display combined score if present in metadata
-        combined = None
-        try:
-            combined = getattr(doc, "metadata", {}).get("combined_score")
-        except Exception:
-            combined = None
+        combined = (getattr(doc, "metadata", {}) or {}).get("combined_score")
         if combined is not None:
             print(f"{label_factory(idx)} score: {score_display} | rerank: {combined:.3f} | {meta_line}")
         else:
@@ -293,11 +265,7 @@ def compose_user_prompt(question: str, results: RetrieverResult) -> str:
             meta_line = format_metadata(getattr(doc, "metadata", {}))
             snippet = clean_snippet(doc.page_content)
             score_display = f"{score:.3f}" if score is not None else "n/a"
-            combined = None
-            try:
-                combined = getattr(doc, "metadata", {}).get("combined_score")
-            except Exception:
-                combined = None
+            combined = (getattr(doc, "metadata", {}) or {}).get("combined_score")
             if combined is not None:
                 lines.append(f"[source {idx}] score: {score_display} | rerank: {combined:.3f} | {meta_line}")
             else:
@@ -318,69 +286,6 @@ def compose_messages(
         SystemMessage(content=system_prompt if system_prompt is not None else SYSTEM_PROMPT),
         HumanMessage(content=compose_user_prompt(question, results)),
     ]
-
-
-def load_chat_model(
-    provider: str,
-    model_name: str,
-    api_key: str,
-    temperature: float,
-    max_tokens: int,
-    base_url: str | None,
-):
-    provider = provider.lower()
-    
-    if provider == "openai":
-        try:
-            from langchain_openai import ChatOpenAI
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise MissingProviderDependencyError(
-                "Missing optional dependency 'langchain-openai'. Install it with `pip install langchain-openai`."
-            ) from exc
-        init_kwargs = {
-            "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "openai_api_key": api_key,
-        }
-        if base_url:
-            init_kwargs["openai_api_base"] = base_url
-        return ChatOpenAI(**init_kwargs)
-    
-    elif provider == "gemini":
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise MissingProviderDependencyError(
-                "Missing optional dependency 'langchain-google-genai'. Install it with `pip install langchain-google-genai`."
-            ) from exc
-        init_kwargs = {
-            "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "google_api_key": api_key,
-        }
-        return ChatGoogleGenerativeAI(**init_kwargs)
-    
-    elif provider == "claude" or provider == "anthropic":
-        try:
-            from langchain_anthropic import ChatAnthropic
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise MissingProviderDependencyError(
-                "Missing optional dependency 'langchain-anthropic'. Install it with `pip install langchain-anthropic`."
-            ) from exc
-        init_kwargs = {
-            "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "anthropic_api_key": api_key,
-        }
-        return ChatAnthropic(**init_kwargs)
-    
-    else:
-        raise UnsupportedProviderError(
-            f"Unsupported provider '{provider}'. Supported: openai, gemini, claude (anthropic)."
-        )
 
 
 def extract_text_from_response(response) -> str:
@@ -414,7 +319,7 @@ def call_chat_model(
     provider: str,
     model_name: str,
     api_key: str | None,
-    temperature: float,
+    temperature: float | None,
     max_tokens: int,
     base_url: str | None,
 ) -> LLMResult:
@@ -445,55 +350,6 @@ def print_usage_metadata(usage: dict | None, show_usage: bool) -> None:
         print(usage)
 
 
-def auto_detect_provider() -> tuple[str, str] | None:
-    """Auto-detect provider based on which API key is set.
-    
-    Returns:
-        (provider_name, api_key) tuple or None if no key found.
-    """
-    if os.environ.get("OPENAI_API_KEY"):
-        return ("openai", os.environ["OPENAI_API_KEY"])
-    if os.environ.get("GOOGLE_API_KEY"):
-        return ("gemini", os.environ["GOOGLE_API_KEY"])
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return ("claude", os.environ["ANTHROPIC_API_KEY"])
-    return None
-
-
-def resolve_provider_and_key(explicit_key: str | None, provider_hint: str | None) -> tuple[str, str | None]:
-    """Resolve the provider and API key from explicit args or environment.
-    
-    Args:
-        explicit_key: Explicit --api-key override
-        provider_hint: Explicit --provider override
-        
-    Returns:
-        (provider, api_key) tuple
-    """
-    # If both explicit values provided, use them
-    if explicit_key and provider_hint:
-        return (provider_hint, explicit_key)
-    
-    # If only explicit key, need to detect provider
-    if explicit_key:
-        if provider_hint:
-            return (provider_hint, explicit_key)
-        # Try to auto-detect from env vars as fallback
-        detected = auto_detect_provider()
-        return (detected[0], explicit_key) if detected else ("openai", explicit_key)
-    
-    # Auto-detect from environment
-    detected = auto_detect_provider()
-    if detected:
-        # If provider_hint given, respect it but use auto-detected key
-        if provider_hint:
-            return (provider_hint, detected[1])
-        return detected
-    
-    # No key found anywhere
-    return (provider_hint or "openai", None)
-
-
 def print_mock_answer(results: RetrieverResult) -> None:
     print("\n=== Final Answer ===\n")
     indices = [str(idx) for idx in range(len(results))]
@@ -512,7 +368,7 @@ def run_llm_mode(
     provider: str,
     model_name: str,
     api_key: str | None,
-    temperature: float,
+    temperature: float | None,
     max_tokens: int,
     base_url: str | None,
     show_usage: bool,
@@ -530,7 +386,7 @@ def run_llm_mode(
             base_url=base_url,
         )
     except MissingAPIKeyError:
-        print("OpenAI API key missing. Falling back to mock answer.", file=sys.stderr)
+        print(f"API key missing for provider '{provider}'. Falling back to mock answer.", file=sys.stderr)
         print_mock_answer(results)
         return
     except (UnsupportedProviderError, MissingProviderDependencyError, LLMInvocationError) as exc:
@@ -555,10 +411,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Agent mode: 'none' (no LLM), 'pretend' (show prompt + templated answer), or 'llm' (call real model)",
     )
     parser.add_argument("--provider", default=None, help="LLM provider override (auto-detected from API keys if not specified)")
-    parser.add_argument("--llm-model", default=DEFAULT_LLM_MODEL, help="Chat model name to request (default: gpt-5-mini)")
+    parser.add_argument("--llm-model", default=None, help="Chat model name to request (defaults to the resolved provider's default model)")
     parser.add_argument("--api-key", dest="api_key", help="API key override (auto-detected from environment if not specified)")
     parser.add_argument("--base-url", dest="base_url", help="Optional base URL for OpenAI-compatible endpoints")
-    parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature for the chat model")
+    parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature for the chat model (omitted unless set)")
     parser.add_argument("--max-tokens", type=int, default=2000, help="Maximum tokens for the chat model response")
     parser.add_argument(
         "--show-usage",
@@ -577,9 +433,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     # retriever scores. This is intentionally lightweight and runs locally.
     try:
         results = rerank_results(results, args.question, alpha=0.5)
-    except Exception:
+    except Exception as exc:
         # Reranker is best-effort; if it fails, fall back to original ordering.
-        pass
+        logger.warning("Reranker failed (%s); keeping retriever ordering.", exc)
 
     if args.agent_mode == "none":
         run_none_mode(results, args.k)
@@ -590,16 +446,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
 
     provider, api_key = resolve_provider_and_key(args.api_key, args.provider)
-    
+
     if not api_key:
         print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.")
         sys.exit(1)
-    
+
     run_llm_mode(
         question=args.question,
         results=results,
         provider=provider,
-        model_name=args.llm_model,
+        model_name=resolve_model(provider, args.llm_model),
         api_key=api_key,
         temperature=args.temperature,
         max_tokens=args.max_tokens,

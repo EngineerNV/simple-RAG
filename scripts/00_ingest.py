@@ -6,28 +6,25 @@ LangChain Document objects. Each Document contains the chunked text as well as m
 about its source file and position within that file.
 """
 
+import logging
 import os  # Handle filesystem navigation for the corpus directory
-import warnings
-from typing import Iterable, List  # Describe the list of LangChain Document objects returned
+import sys
+from pathlib import Path
+from typing import Iterable, List, Sequence  # Describe the list of LangChain Document objects returned
 
 from langchain_core.documents import Document  # Represent individual text chunks with metadata
 import re
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# Suppress noisy deprecation warnings without changing packages.
-try:  # Best-effort: some environments provide this warning class
-    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
-    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
-except Exception:
-    # Fallback to message-based filters if the class isn't importable
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*HuggingFaceEmbeddings.*was deprecated.*",
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*manual persistence method is no longer supported.*",
-    )
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from utils.warnings_filter import suppress_langchain_warnings
+
+suppress_langchain_warnings()
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------- Config ----------------------------
 CORPUS_DIR = os.environ.get("CORPUS_DIR", os.path.join("data", "corpus"))
@@ -68,7 +65,8 @@ def _build_splitter() -> RecursiveCharacterTextSplitter:
             chunk_size=chunk_size,
             chunk_overlap=overlap,
         )
-    except Exception:  # pragma: no cover - network restricted environments fall back here
+    except Exception as exc:  # pragma: no cover - network restricted environments fall back here
+        logger.debug("tiktoken splitter unavailable (%s); using approximate word-count splitter.", exc)
         return RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=overlap,
@@ -146,14 +144,11 @@ def split_markdown(markdown_text: str, *, source_path: str) -> List[Document]:
                     md["##"] = h2
                 documents.append(Document(page_content=content, metadata=md))
         else:
-            # Even for single-chunk case, preserve H1 in metadata for tests
+            # Even for single-chunk case, preserve H1 in metadata
             if h1:
-                try:
-                    md0 = getattr(documents[0], "metadata", {}) or {}
-                    md0["#"] = h1
-                    documents[0].metadata = md0
-                except Exception:
-                    pass
+                md0 = getattr(documents[0], "metadata", {}) or {}
+                md0["#"] = h1
+                documents[0].metadata = md0
 
     total_chunks = len(documents)
     for idx, doc in enumerate(documents):
@@ -175,7 +170,7 @@ def process_file(path: str) -> Iterable[Document]:
     return split_markdown(read_text(path), source_path=path)
 
 
-def ingest() -> List:
+def ingest() -> List[Document]:
     files = list_corpus_files(CORPUS_DIR)
     if not files:
         print(f"No files in {CORPUS_DIR}")
@@ -192,7 +187,7 @@ def ingest() -> List:
     return docs_all
 
 
-def preview(docs, n: int = 3):
+def preview(docs: Sequence[Document], n: int = 3) -> None:
     for i, d in enumerate(docs[:n]):
         metadata = getattr(d, "metadata", {}) or {}
         source = metadata.get("source", "<unknown source>")

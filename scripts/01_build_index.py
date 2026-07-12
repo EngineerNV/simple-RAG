@@ -9,15 +9,12 @@ to the retrieval step.
 
 from __future__ import annotations
 
+import logging
 import shutil  # Clean up old persistence directories when rebuilding the index
 import sys
 from pathlib import Path  # Resolve the directory where the Chroma DB should live
 from typing import Iterable, List  # Provide typing for the document list flowing through the script
-import warnings
 
-# Prefer the newer langchain_huggingface package if available to avoid
-# LangChain deprecation warnings; fall back to the older import for
-# compatibility in environments where the new package isn't installed.
 from langchain_community.vectorstores import (  # Persist embeddings in a local Chroma collection
     Chroma,
 )
@@ -31,8 +28,15 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct script exe
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     from scripts import ingest as run_ingest
 
-CHROMA_DIR = Path("data") / "chroma"
-DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+from utils import settings
+from utils.warnings_filter import suppress_langchain_warnings
+
+suppress_langchain_warnings()
+
+logger = logging.getLogger(__name__)
+
+CHROMA_DIR = settings.CHROMA_DIR
+DEFAULT_MODEL_NAME = settings.DEFAULT_EMBED_MODEL
 
 _RUN_METADATA: dict[str, object] = {}
 
@@ -50,21 +54,6 @@ def build_embeddings_model(model_name: str = DEFAULT_MODEL_NAME) -> Embeddings:
 
     # Keep the stable import path to avoid environment drift.
     from langchain_community.embeddings import HuggingFaceEmbeddings as HFEmbeddings  # type: ignore
-
-    # Suppress noisy deprecation warnings without changing packages.
-    try:  # Best-effort: some environments provide this warning class
-        from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
-        warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
-    except Exception:
-        # Fallback to message-based filters if the class isn't importable
-        warnings.filterwarnings(
-            "ignore",
-            message=r".*HuggingFaceEmbeddings.*was deprecated.*",
-        )
-        warnings.filterwarnings(
-            "ignore",
-            message=r".*manual persistence method is no longer supported.*",
-        )
 
     return HFEmbeddings(model_name=model_name)
 
@@ -122,9 +111,9 @@ def persist_chroma(processed_docs: Iterable[Document], embedding_model: Embeddin
         try:
             # Some Document implementations are frozen; assign to .metadata if possible
             doc.metadata = sanitized
-        except Exception:
-            # Fallback: nothing to do; Chroma.from_documents will use the sanitized mapping below
-            pass
+        except (AttributeError, TypeError):
+            # Frozen Document; the sanitized mapping below is passed to Chroma anyway.
+            logger.debug("Could not assign sanitized metadata back to a document.")
 
     sanitized_metadatas = [_sanitize_metadata(getattr(d, "metadata", {}) or {}) for d in processed_documents]
 
@@ -132,19 +121,18 @@ def persist_chroma(processed_docs: Iterable[Document], embedding_model: Embeddin
     # Use from_texts to explicitly pass sanitized texts and metadatas and avoid internal
     # duplication of the `metadatas` keyword.
     texts = [getattr(d, "page_content", str(d)) for d in processed_documents]
+    # Chroma 0.4+ persists automatically when a persist_directory is supplied,
+    # so no explicit persist() call is needed (it was deprecated and removed).
     store = Chroma.from_texts(
         texts=texts,
         embedding=embedding_model,
         metadatas=sanitized_metadatas,
         persist_directory=str(CHROMA_DIR),
     )
-    store.persist()
 
-    collection = store._collection  # type: ignore[attr-defined]
     _RUN_METADATA.update(
         {
             "doc_count": len(processed_documents),
-            "collection_name": getattr(collection, "name", "default"),
             "persist_directory": str(CHROMA_DIR),
             "rebuilt": already_exists,
         }
@@ -156,19 +144,15 @@ def persist_chroma(processed_docs: Iterable[Document], embedding_model: Embeddin
 def summarize_run(store: Chroma) -> None:
     """Print key facts that help graders confirm the index was built correctly."""
 
-    collection = store._collection  # type: ignore[attr-defined]
-    count = collection.count()
     sample = store.get(include=["metadatas"], limit=1)
     sample_metadata = sample.get("metadatas", [])
     metadata_preview = sample_metadata[0] if sample_metadata else {}
 
     rebuilt = _RUN_METADATA.get("rebuilt", False)
-    collection_name = _RUN_METADATA.get("collection_name", getattr(collection, "name", "default"))
     persist_directory = _RUN_METADATA.get("persist_directory", str(CHROMA_DIR))
-    doc_count = _RUN_METADATA.get("doc_count", count)
+    doc_count = _RUN_METADATA.get("doc_count", "<unknown>")
 
     print("Chroma index build complete.")
-    print(f" - Collection name: {collection_name}")
     print(f" - Persist directory: {persist_directory}")
     print(f" - Documents embedded: {doc_count}")
     print(f" - Existing store replaced: {'yes' if rebuilt else 'no'}")
@@ -185,9 +169,9 @@ def summarize_run(store: Chroma) -> None:
         chunk_overlap = getattr(ingest_mod, "CHUNK_OVERLAP_TOKENS", None)
         if chunk_size is not None:
             print(f" - Ingest chunking: chunk_size={chunk_size}, overlap={chunk_overlap}")
-    except Exception:
-        # Not critical; continue silently if we can't import ingest config.
-        pass
+    except ImportError:
+        # Not critical; continue without the chunking summary.
+        logger.debug("Could not import scripts.00_ingest for the chunking summary.")
 
 
 def main() -> None:

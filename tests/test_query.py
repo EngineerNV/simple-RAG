@@ -61,7 +61,7 @@ def test_run_llm_mode_falls_back_without_key(capsys: pytest.CaptureFixture[str])
         show_usage=False,
     )
     captured = capsys.readouterr()
-    assert "OpenAI API key missing" in captured.err
+    assert "API key missing for provider 'openai'" in captured.err
     assert "(mock) Answer" in captured.out
 
 
