@@ -105,6 +105,7 @@ Note: The agentic CLI and helper functions reuse the same chat model key; there 
 | `scripts/06_quiz.py` | Interactive reviewer loop for collecting human judgements (faithful/abstain/tags). |
 | `scripts/04_llm_api.py` | Standalone helper for formatting prompts and calling a chat model with optional context snippets. |
 | `scripts/05_chat_cli.py` | SIMPLE_RAG chat experience: one structured router call per turn, grounded prompting, persona system prompt, and a progress spinner. |
+| `scripts/07_debug_chat.py` | Debug chat TUI: same session as the chat CLI, plus a live metrics pane showing router decisions, per-chunk retrieval scores, per-stage timing, and memory stats. |
 | `agent_orchestration_helper.py` | Chat orchestration: the router (scope + retrieval + query rewrite in one call), the system prompt/evidence contract, and the testable `ChatSession` turn handler. |
 | `scripts/report.py` | Aggregates quiz results into a Markdown summary. |
 | `utils/` | Shared modules: `llm.py` (providers/models/factory), `settings.py`, `textproc.py`, `chat_history.py`, persona/rejection helpers. |
@@ -130,6 +131,9 @@ python scripts/02_query.py -q "How do I rebuild the index?" --agent-mode llm --s
 
 # 5. Chat with the SIMPLE_RAG agent (persona + spinner)
 python scripts/05_chat_cli.py --debug --show-context
+
+# 5b. Same chat, but with a live pipeline-metrics panel (router / retrieval / timing / memory)
+python scripts/07_debug_chat.py --chat-lines 30
 
 # 6. Score an evaluation dataset produced from the quiz or custom tooling
 python scripts/03_eval.py --in data/eval/sample.json --out reports/sample_eval.json

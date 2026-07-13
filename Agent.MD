@@ -62,7 +62,7 @@ Core pipeline (numbered in run order):
 
 7) `scripts/05_chat_cli.py` — interactive chat agent: one router call (scope + retrieval decision + query rewrite) → retrieve → grounded answer. Shows contexts when `--show-context`.
 
-8) `scripts/07_debug_chat.py` — debug chat TUI; same RAG session as `05_chat_cli.py` but renders a two-pane Rich layout after each turn: left pane is the rolling conversation, right pane shows router decisions (on_topic, use_rag, confidence, search query, reason), per-chunk retrieval scores (score / rerank / lexical), per-stage timing (router ms, retrieval ms, LLM ms, total ms), and memory stats (turn count, raw message count, summary length). Use `--chat-lines` to control the chat history viewport depth.
+8) `scripts/07_debug_chat.py` — debug chat TUI; builds its session through `05_chat_cli.py`'s shared `create_chat_runtime` factory, then renders a two-pane Rich layout after each turn: left pane is the rolling conversation (error turns shown in red), right pane shows router decisions (on_topic, use_rag, confidence, search query, reason), per-chunk retrieval scores (score / rerank / lexical), per-stage timing (router ms, retrieval ms, LLM ms, total ms), and memory stats (turn count, raw message count, summary length). Use `--chat-lines` to control the chat history viewport depth. Panel/timing tests: `tests/test_debug_chat.py`.
 
 Agent orchestration and utils:
 
@@ -131,6 +131,7 @@ Useful flags:
   - `tests/test_chat_session.py` — the chat contract: `<documents>` evidence (escaped, most-relevant first, never sanitized), history stores only the clean user message, off-topic rejection with static fallback, an LLM failure leaves no history residue and the session survives.
   - `tests/test_llm_utils.py` — provider auto-detect precedence, per-provider default models, temperature omission, Gemini `max_output_tokens` mapping.
   - `tests/test_utils_misc.py` — byte-stable system prompt, `SummaryBufferHistory` pruning keeps a human-first history.
+  - `tests/test_debug_chat.py` — debug TUI panels (metrics panel distinguishes empty retrieval from RAG-skipped, survives non-numeric scores, error turns stay visible) and `handle_turn` per-stage timings on success/error/rejection paths.
   - All of these run offline with fakes (`tests/fakes.py`) — no API keys.
 
 ## Contribution checklist (for agents)

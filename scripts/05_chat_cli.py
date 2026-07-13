@@ -117,14 +117,15 @@ def render_context_table(results, console: Console) -> None:
     table.add_column("Source", style="cyan", no_wrap=True)
     table.add_column("Snippet", style="white")
     for idx, (doc, score) in enumerate(results):
-        snippet = clean_snippet(doc.page_content) or "(empty snippet)"
-        meta = doc.metadata or {}
+        snippet = clean_snippet(getattr(doc, "page_content", "") or "") or "(empty snippet)"
+        meta = getattr(doc, "metadata", {}) or {}
         meta_bits = ", ".join(f"{k}={v}" for k, v in meta.items()) if meta else "no metadata"
         combined = meta.get("combined_score")
-        if combined is not None:
-            header = f"[{idx}] score={score:.3f} rerank={combined:.3f}\n{meta_bits}"
+        score_str = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
+        if isinstance(combined, (int, float)):
+            header = f"[{idx}] score={score_str} rerank={combined:.3f}\n{meta_bits}"
         else:
-            header = f"[{idx}] score={score:.3f}\n{meta_bits}"
+            header = f"[{idx}] score={score_str}\n{meta_bits}"
         table.add_row(header, textwrap.fill(snippet, width=80))
     console.print(table)
 
@@ -157,18 +158,22 @@ def save_transcript(
         console.print(f"[red]Failed to save transcript: {exc}[/red]")
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    load_dotenv()
-    args = parse_args(argv)
-    console = Console()
+@dataclass
+class ChatRuntime:
+    """Everything a chat front-end needs from the shared session factory."""
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.debug else logging.WARNING,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-    )
-    if args.debug:
-        logger.debug("Debug logging enabled.")
+    session: ChatSession
+    history: SummaryBufferHistory
+    provider: str
+    llm_model: str
 
+
+def create_chat_runtime(args: argparse.Namespace, console: Console) -> ChatRuntime:
+    """Build the retrieval store, LLM, memory, and ChatSession from parsed args.
+
+    Shared by the chat CLI and the debug TUI so the wiring lives in one place.
+    Prints a console error and exits on a missing index, key, or provider dep.
+    """
     try:
         _, store = create_retrieval_store(model_name=args.embedding_model, persist_dir=Path(args.persist_dir))
     except FileNotFoundError as exc:
@@ -236,6 +241,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         system_prompt=args.system_prompt or build_system_prompt(),
         retrieval_k=args.retrieval_k,
     )
+    return ChatRuntime(session=session, history=history, provider=provider, llm_model=llm_model)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    load_dotenv()
+    args = parse_args(argv)
+    console = Console()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.WARNING,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+    if args.debug:
+        logger.debug("Debug logging enabled.")
+
+    runtime = create_chat_runtime(args, console)
+    session = runtime.session
+    history = runtime.history
 
     console.print(
         Panel(
@@ -263,7 +286,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         logger.debug("Received user message: %s", user_message)
 
         if user_message.startswith("/"):
-            command = user_message.lstrip("/").lower()
+            # Strip exactly one slash so "//exit" stays an unknown command.
+            command = user_message[1:].lower()
             if command in {"exit", "quit"}:
                 break
             if command == "help":

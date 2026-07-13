@@ -1,8 +1,10 @@
 """07_debug_chat.py — debug chat TUI with live RAG pipeline metrics.
 
-Same RAG session as ``05_chat_cli.py`` but renders a two-pane Rich layout after
-each turn: the left pane shows the rolling conversation and the right pane shows
-router decisions, per-chunk retrieval scores, per-stage timing, and memory stats.
+Same RAG session as ``05_chat_cli.py`` (built through its shared
+``create_chat_runtime`` factory) but renders a two-pane Rich layout after each
+turn: the left pane shows the rolling conversation and the right pane shows
+router decisions, per-chunk retrieval scores, per-stage timing, and memory
+stats.
 
 Usage::
 
@@ -20,7 +22,7 @@ import textwrap
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence
 
 try:
     from dotenv import load_dotenv
@@ -33,7 +35,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from rich.columns import Columns
 from rich.console import Console
 from rich.layout import Layout
 from rich.panel import Panel
@@ -41,39 +42,23 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
-
-from agent_orchestration_helper import (
-    ChatSession,
-    TurnResult,
-    build_router,
-    build_system_prompt,
-)
-from utils import build_rejection_writer, suppress_langchain_warnings
+from agent_orchestration_helper import TurnResult
 from utils import settings
 from utils.chat_history import SummaryBufferHistory
-from utils.llm import resolve_model, resolve_provider_and_key
 
-query_module = import_module("scripts.02_query")
+chat_cli_module = import_module("scripts.05_chat_cli")
 
-clean_snippet = query_module.clean_snippet  # type: ignore[attr-defined]
-create_retrieval_store = query_module.create_retrieval_store  # type: ignore[attr-defined]
-load_chat_model = query_module.load_chat_model  # type: ignore[attr-defined]
-retrieve_contexts = query_module.retrieve_contexts  # type: ignore[attr-defined]
-
-suppress_langchain_warnings()
+TranscriptLog = chat_cli_module.TranscriptLog  # type: ignore[attr-defined]
+create_chat_runtime = chat_cli_module.create_chat_runtime  # type: ignore[attr-defined]
+render_context_table = chat_cli_module.render_context_table  # type: ignore[attr-defined]
+save_transcript = chat_cli_module.save_transcript  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_EMBED_MODEL = settings.DEFAULT_EMBED_MODEL
 CHROMA_DIR = settings.CHROMA_DIR
 
-# ── width constants ────────────────────────────────────────────────────────────
-
-_METRICS_WIDTH = 44   # right panel character width (approx)
-_CHAT_WRAP = 64       # text wrap width inside the chat panel
+_CHAT_WRAP = 64  # text wrap width inside the chat panel
 
 
 # ── data classes ──────────────────────────────────────────────────────────────
@@ -87,12 +72,16 @@ class DebugChatTurn:
 
 @dataclass
 class DebugState:
+    """Every turn (including error turns) plus the metrics of the latest one."""
+
     turns: List[DebugChatTurn] = field(default_factory=list)
-    last_result: Optional[TurnResult] = None
 
     def add_turn(self, user_message: str, answer: str, result: TurnResult) -> None:
         self.turns.append(DebugChatTurn(user_message, answer, result))
-        self.last_result = result
+
+    @property
+    def last_result(self) -> Optional[TurnResult]:
+        return self.turns[-1].result if self.turns else None
 
 
 # ── panel builders ─────────────────────────────────────────────────────────────
@@ -152,7 +141,9 @@ def build_metrics_panel(result: Optional[TurnResult], history: SummaryBufferHist
             lex_str = f"{lexical:.2f}" if isinstance(lexical, (int, float)) else "—"
             chunk_table.add_row(str(idx), source, score_str, rerank_str, lex_str)
         t.add_row("", chunk_table)
-    elif result.used_rag:
+    elif route is not None and route.use_rag:
+        # RAG was attempted but retrieval came back empty (result.used_rag is
+        # False in that case, so check the route decision itself).
         t.add_row(Text("(no chunks returned)", style="dim"), "")
     else:
         t.add_row(Text("(RAG not used)", style="dim"), "")
@@ -180,10 +171,9 @@ def build_metrics_panel(result: Optional[TurnResult], history: SummaryBufferHist
     # ── Memory ───────────────────────────────────────────────────────────────
     t.add_row("", "")
     t.add_row(Text("MEMORY", style="bold yellow underline"), "")
-    raw = list(getattr(history, "raw_messages", []))
+    raw = getattr(history, "raw_messages", []) or []
     summary = getattr(history, "moving_summary_buffer", "") or ""
-    turn_count = len(raw) // 2
-    t.add_row("turns", str(turn_count))
+    t.add_row("turns", str(len(raw) // 2))
     t.add_row("raw msgs", str(len(raw)))
     t.add_row("summary", f"{len(summary)} chars")
 
@@ -191,7 +181,7 @@ def build_metrics_panel(result: Optional[TurnResult], history: SummaryBufferHist
 
 
 def build_chat_panel(turns: List[DebugChatTurn], max_lines: int = 40) -> Panel:
-    """Left panel: rolling conversation history."""
+    """Left panel: rolling conversation history (error turns shown in red)."""
     if not turns:
         return Panel(
             Text("Chat will appear here. Type a message below.", style="dim"),
@@ -203,10 +193,11 @@ def build_chat_panel(turns: List[DebugChatTurn], max_lines: int = 40) -> Panel:
     for turn in turns:
         you_lines = textwrap.wrap(turn.user_message, width=_CHAT_WRAP) or [""]
         asst_lines = textwrap.wrap(turn.answer, width=_CHAT_WRAP) or [""]
+        asst_style = "bold red" if turn.result.error else "bold green"
         lines.append(f"[bold cyan]You:[/bold cyan] {you_lines[0]}")
         for l in you_lines[1:]:
             lines.append(f"     {l}")
-        lines.append(f"[bold green]Asst:[/bold green] {asst_lines[0]}")
+        lines.append(f"[{asst_style}]Asst:[/{asst_style}] {asst_lines[0]}")
         for l in asst_lines[1:]:
             lines.append(f"      {l}")
         lines.append("")
@@ -225,8 +216,11 @@ def render_screen(
     console: Console,
     chat_panel: Panel,
     metrics_panel: Panel,
+    status_line: str = "",
 ) -> None:
     console.clear()
+    if status_line:
+        console.print(Text(status_line, style="dim cyan"))
     layout = Layout()
     layout.split_row(
         Layout(chat_panel, name="chat", ratio=3),
@@ -239,19 +233,23 @@ def render_screen(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Debug chat TUI with RAG pipeline metrics")
-    parser.add_argument("--retrieval-k", type=int, default=3)
-    parser.add_argument("--embedding-model", default=DEFAULT_EMBED_MODEL)
-    parser.add_argument("--persist-dir", default=str(CHROMA_DIR))
-    parser.add_argument("--llm-model", default=None)
-    parser.add_argument("--provider", default=None)
-    parser.add_argument("--api-key", dest="api_key")
-    parser.add_argument("--temperature", type=float, default=None)
-    parser.add_argument("--max-tokens", type=int, default=2000)
-    parser.add_argument("--base-url", dest="base_url")
-    parser.add_argument("--system-prompt", default=None)
-    parser.add_argument("--chat-lines", type=int, default=40, help="Max lines of chat history visible in left panel")
-    parser.add_argument("--save-transcript", dest="transcript_path")
-    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--retrieval-k", type=int, default=3, help="Number of context chunks to retrieve per question")
+    parser.add_argument("--embedding-model", default=DEFAULT_EMBED_MODEL, help="Embedding model to load for retrieval")
+    parser.add_argument("--persist-dir", default=str(CHROMA_DIR), help="Path to the persisted Chroma directory")
+    parser.add_argument("--llm-model", default=None, help="Chat model identifier (defaults to the resolved provider's default model)")
+    parser.add_argument("--provider", default=None, help="LLM provider override (auto-detected from API keys if not specified)")
+    parser.add_argument("--api-key", dest="api_key", help="Explicit API key override for the LLM provider")
+    parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature for the chat model (omitted unless set)")
+    parser.add_argument("--max-tokens", type=int, default=2000, help="Maximum tokens per LLM response")
+    parser.add_argument("--base-url", dest="base_url", help="Optional base URL for OpenAI-compatible endpoints")
+    parser.add_argument(
+        "--system-prompt",
+        default=None,
+        help="Replace the entire built-in system prompt (persona + grounding rules) with your own text",
+    )
+    parser.add_argument("--chat-lines", type=int, default=40, help="Max lines of chat history visible in the left panel")
+    parser.add_argument("--save-transcript", dest="transcript_path", help="Optional file path to write the chat transcript on exit")
+    parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging to stderr")
     return parser.parse_args(argv)
 
 
@@ -265,69 +263,22 @@ def main(argv: Sequence[str] | None = None) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    try:
-        _, store = create_retrieval_store(model_name=args.embedding_model, persist_dir=Path(args.persist_dir))
-    except FileNotFoundError as exc:
-        console.print(f"[red]{exc}[/red]")
-        sys.exit(1)
-
-    provider, api_key = resolve_provider_and_key(args.api_key, args.provider)
-    if not api_key:
-        console.print("[red]No API key. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY.[/red]")
-        sys.exit(1)
-
-    llm_model = resolve_model(provider, args.llm_model)
-
-    try:
-        llm = load_chat_model(
-            provider=provider,
-            model_name=llm_model,
-            api_key=api_key,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            base_url=args.base_url,
-        )
-    except RuntimeError as exc:
-        console.print(f"[red]{exc}[/red]")
-        sys.exit(1)
-
-    router_llm = build_router(llm)
-    rejection_llm = build_rejection_writer(llm)
-    history = SummaryBufferHistory(llm=llm, max_token_limit=max(args.max_tokens * 2, 1200))
-
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", "{system_prompt}"),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{context_block}{user_message}"),
-        ]
-    )
-    response_chain = prompt | llm | StrOutputParser()
-    chat_with_history = RunnableWithMessageHistory(
-        response_chain,
-        lambda _session_id: history,
-        input_messages_key="user_message",
-        history_messages_key="chat_history",
-    )
-
-    session = ChatSession(
-        router_llm=router_llm,
-        rejection_llm=rejection_llm,
-        chat_with_history=chat_with_history,
-        history_adapter=history,
-        store=store,
-        retrieve_contexts_fn=retrieve_contexts,
-        system_prompt=args.system_prompt or build_system_prompt(),
-        retrieval_k=args.retrieval_k,
-    )
+    runtime = create_chat_runtime(args, console)
+    session = runtime.session
+    history = runtime.history
 
     state = DebugState()
+    transcript_log = TranscriptLog()
+    # Keep provider/model visible even after the layout repaints the screen.
+    status_line = (
+        f"simple-RAG debug  |  provider: {runtime.provider}  model: {runtime.llm_model}"
+        f"  k={args.retrieval_k}  |  /help /exit /reset /showctx"
+    )
 
-    # Initial screen: show empty panels with welcome text
     console.print(
         Panel(
             Text(
-                f"Debug chat TUI  |  provider: {provider}  model: {llm_model}  k={args.retrieval_k}\n"
+                f"Debug chat TUI  |  provider: {runtime.provider}  model: {runtime.llm_model}  k={args.retrieval_k}\n"
                 "Commands: /help  /exit  /reset  /showctx",
                 style="cyan",
             ),
@@ -348,7 +299,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             continue
 
         if user_message.startswith("/"):
-            cmd = user_message.lstrip("/").lower()
+            # Strip exactly one slash so "//exit" stays an unknown command.
+            cmd = user_message[1:].lower()
             if cmd in {"exit", "quit"}:
                 break
             if cmd == "help":
@@ -357,6 +309,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             if cmd == "reset":
                 history.clear()
                 state = DebugState()
+                transcript_log.reset()
                 console.print("[green]Cleared.[/green]")
                 continue
             if cmd == "showctx":
@@ -369,62 +322,23 @@ def main(argv: Sequence[str] | None = None) -> None:
         with console.status("[cyan]Thinking...[/cyan]", spinner="dots"):
             result = session.handle_turn(user_message)
 
-        answer = result.answer
-        if not result.error:
-            state.add_turn(user_message, answer, result)
-        else:
-            # Still show the error turn in the metrics panel
-            state.last_result = result
+        # Error turns are shown too (in red) so the user always sees a
+        # response and the transcript reflects the whole conversation.
+        state.add_turn(user_message, result.answer, result)
+        transcript_log.add_turn(user_message, result.answer, result.context_blocks)
 
         render_screen(
             console,
             build_chat_panel(state.turns, max_lines=args.chat_lines),
             build_metrics_panel(state.last_result, history),
+            status_line=status_line,
         )
 
         if show_full_ctx and result.results:
-            _render_full_ctx(result.results, console)
+            render_context_table(result.results, console)
 
     if args.transcript_path:
-        _save_transcript(history, state, Path(args.transcript_path), console)
-
-
-def _render_full_ctx(results: Sequence[Tuple], console: Console) -> None:
-    table = Table(title="Retrieved chunks", box=None)
-    table.add_column("Source", style="cyan", no_wrap=True)
-    table.add_column("Snippet", style="white")
-    for idx, (doc, score) in enumerate(results):
-        snippet = clean_snippet(doc.page_content) or "(empty)"
-        meta = doc.metadata or {}
-        meta_bits = ", ".join(f"{k}={v}" for k, v in meta.items()) if meta else "no metadata"
-        combined = meta.get("combined_score")
-        header = (
-            f"[{idx}] score={score:.3f} rerank={combined:.3f}\n{meta_bits}"
-            if combined is not None
-            else f"[{idx}] score={score:.3f}\n{meta_bits}"
-        )
-        table.add_row(header, textwrap.fill(snippet, width=80))
-    console.print(table)
-
-
-def _save_transcript(
-    history: SummaryBufferHistory,
-    state: DebugState,
-    path: Path,
-    console: Console,
-) -> None:
-    try:
-        lines = []
-        summary_text = history.moving_summary_buffer.strip()
-        if summary_text:
-            lines.append("# Conversation summary\n" + summary_text + "\n")
-        for turn in state.turns:
-            lines.append(f"## User\n{turn.user_message}\n")
-            lines.append(f"## Assistant\n{turn.answer}\n")
-        path.write_text("\n".join(lines), encoding="utf-8")
-        console.print(f"[green]Transcript written to {path}[/green]")
-    except Exception as exc:
-        console.print(f"[red]Failed to save transcript: {exc}[/red]")
+        save_transcript(history, transcript_log, Path(args.transcript_path), console)
 
 
 if __name__ == "__main__":
