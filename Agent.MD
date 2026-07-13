@@ -62,6 +62,8 @@ Core pipeline (numbered in run order):
 
 7) `scripts/05_chat_cli.py` — interactive chat agent: one router call (scope + retrieval decision + query rewrite) → retrieve → grounded answer. Shows contexts when `--show-context`.
 
+8) `scripts/07_debug_chat.py` — debug chat TUI; same RAG session as `05_chat_cli.py` but renders a two-pane Rich layout after each turn: left pane is the rolling conversation, right pane shows router decisions (on_topic, use_rag, confidence, search query, reason), per-chunk retrieval scores (score / rerank / lexical), per-stage timing (router ms, retrieval ms, LLM ms, total ms), and memory stats (turn count, raw message count, summary length). Use `--chat-lines` to control the chat history viewport depth.
+
 Agent orchestration and utils:
 
 - `agent_orchestration_helper.py` — loads topic inventory from `rag_content.json`; the structured router (`route_turn`), the prompt contract (`build_system_prompt`, `format_context_documents`), and the testable `ChatSession` turn handler.
@@ -103,6 +105,7 @@ Flow: router (one structured call: scope + use-RAG + rewritten search query) →
 Useful flags:
 
 - `scripts/05_chat_cli.py --show-context --debug`
+- `scripts/07_debug_chat.py --chat-lines 30 --debug`  (debug TUI: router + retrieval + timing + memory panel)
 - `scripts/02_query.py -q "..." --agent-mode pretend|llm --k 5`
 
 ## Logging and warnings

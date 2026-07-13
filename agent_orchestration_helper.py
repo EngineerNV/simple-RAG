@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -295,6 +296,8 @@ class TurnResult:
     used_rag: bool = False
     route: Optional[RouteDecision] = None
     error: Optional[str] = None
+    timings: Dict[str, float] = field(default_factory=dict)
+    # keys: "router_ms", "retrieval_ms", "llm_ms", "total_ms"
 
 
 class ChatSession:
@@ -328,6 +331,8 @@ class ChatSession:
         self.session_id = session_id
 
     def handle_turn(self, user_message: str) -> TurnResult:
+        t0 = time.perf_counter()
+
         route = route_turn(
             self.router_llm,
             user_message,
@@ -336,19 +341,25 @@ class ChatSession:
             rag_topics=self.rag_topics,
             specialization_list=self.specialization_list,
         )
+        router_ms = (time.perf_counter() - t0) * 1000
         logger.debug("Route decision: %s", route.model_dump() if hasattr(route, "model_dump") else route)
 
         if not route.on_topic:
             answer = self._reject(user_message)
-            # The rejection never goes through the history-aware chain, so
-            # record the clean exchange manually.
             self.history_adapter.add_messages(
                 [HumanMessage(content=user_message), AIMessage(content=answer)]
             )
-            return TurnResult(answer=answer, route=route)
+            total_ms = (time.perf_counter() - t0) * 1000
+            return TurnResult(
+                answer=answer,
+                route=route,
+                timings={"router_ms": router_ms, "total_ms": total_ms},
+            )
 
         results: Sequence[Tuple[Any, float]] = []
+        retrieval_ms = 0.0
         if route.use_rag:
+            t1 = time.perf_counter()
             try:
                 results = self.retrieve_contexts_fn(
                     self.store, route.search_query or user_message, self.retrieval_k
@@ -356,8 +367,10 @@ class ChatSession:
             except Exception as exc:
                 logger.warning("Retrieval failed (%s); answering without contexts.", exc)
                 results = []
+            retrieval_ms = (time.perf_counter() - t1) * 1000
 
         context_block = build_context_block(results, route.use_rag)
+        t2 = time.perf_counter()
         try:
             answer = self.chat_with_history.invoke(
                 {
@@ -368,8 +381,8 @@ class ChatSession:
                 config={"configurable": {"session_id": self.session_id}},
             )
         except Exception as exc:
-            # Leave history untouched (the chain only persists on success) so
-            # the session can simply continue with the next turn.
+            llm_ms = (time.perf_counter() - t2) * 1000
+            total_ms = (time.perf_counter() - t0) * 1000
             logger.exception("LLM call failed.")
             return TurnResult(
                 answer="Sorry — I hit an error talking to the model. Please try again.",
@@ -378,14 +391,28 @@ class ChatSession:
                 used_rag=bool(route.use_rag and results),
                 route=route,
                 error=str(exc),
+                timings={
+                    "router_ms": router_ms,
+                    "retrieval_ms": retrieval_ms,
+                    "llm_ms": llm_ms,
+                    "total_ms": total_ms,
+                },
             )
 
+        llm_ms = (time.perf_counter() - t2) * 1000
+        total_ms = (time.perf_counter() - t0) * 1000
         return TurnResult(
             answer=answer,
             results=results,
             context_blocks=summarize_contexts(results),
             used_rag=bool(route.use_rag and results),
             route=route,
+            timings={
+                "router_ms": router_ms,
+                "retrieval_ms": retrieval_ms,
+                "llm_ms": llm_ms,
+                "total_ms": total_ms,
+            },
         )
 
     def _reject(self, user_message: str) -> str:
