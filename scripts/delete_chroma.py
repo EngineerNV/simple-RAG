@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 """
-Delete Chroma artifacts and local chunks to reset the workspace for fresh ingestion.
+Delete Chroma artifacts to reset the workspace for a fresh index build.
 
-By default, this script empties these directories (without removing the directories themselves):
-- data/chunks
-- data/chroma
+By default, this script empties data/chroma (without removing the directory
+itself).
 
 Usage examples:
   - Dry run (show what would be deleted):
       python scripts/delete_chroma.py --dry-run
   - Delete without interactive prompt:
       python scripts/delete_chroma.py --force
-  - Only clear chunks:
-      python scripts/delete_chroma.py --targets chunks --force
   - Custom project root:
       python scripts/delete_chroma.py --root "C:/path/to/simple-RAG" --force
 
@@ -33,7 +30,7 @@ from typing import Iterable, List
 
 
 DATA_DIR_NAME = "data"
-DEFAULT_TARGETS = ("chunks", "chroma")
+DEFAULT_TARGETS = ("chroma",)
 
 
 def _on_rm_error(func, path, exc_info):
@@ -92,7 +89,7 @@ def resolve_repo_root(explicit_root: str | None) -> Path:
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Empty data/chunks and data/chroma for a fresh ingestion run.",
+        description="Empty data/chroma for a fresh index build.",
     )
     parser.add_argument(
         "--root",
@@ -105,7 +102,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         nargs="+",
         choices=list(DEFAULT_TARGETS),
         default=list(DEFAULT_TARGETS),
-        help="Which directories under data/ to clear (default: chunks chroma).",
+        help="Which directories under data/ to clear (default: chroma).",
     )
     parser.add_argument(
         "--dry-run",

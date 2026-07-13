@@ -15,7 +15,7 @@
    pip install -r requirements-min.txt  # or requirements.txt for the full stack
    ```
 2. **Configure secrets:** Set the appropriate API key environment variable for your chosen LLM provider (see Environment section below). Alternatively, copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` (or `GOOGLE_API_KEY`/`ANTHROPIC_API_KEY`).
-3. **Add source material:** drop markdown files into `data/corpus/` (the `corpus/` and `chroma/` directories are created for you).
+3. **Add source material:** drop markdown files into `data/corpus/` (`data/chroma/` is created automatically when you build the index).
    - A sample knowledge base, `Pokémon.MD`, is included so you can immediately test ingestion and retrieval behaviour.
 4. **Run the pipeline:**
    ```bash
@@ -40,19 +40,16 @@ These scripts load environment variables (from your process and from a `.env` fi
 
 **Environment variables (auto-detection order):**
 
-1. **`OPENAI_API_KEY`** — For OpenAI models (gpt-4, gpt-3.5-turbo, etc.)
-   - Auto-detected provider: `openai`
-   - Models: `gpt-4`, `gpt-3.5-turbo`, `gpt-4-turbo`, `gpt-4o`, etc.
+1. **`OPENAI_API_KEY`** — For OpenAI models
+   - Auto-detected provider: `openai` (default model: `gpt-5-mini`)
    - Base URL override: `--base-url` for OpenAI-compatible endpoints
 
 2. **`GOOGLE_API_KEY`** — For Google Gemini models
-   - Auto-detected provider: `gemini`
-   - Models: `gemini-pro`, `gemini-1.5-pro`, `gemini-1.5-flash`, etc.
+   - Auto-detected provider: `gemini` (default model: `gemini-2.5-flash`)
    - Requires: `pip install langchain-google-genai`
 
 3. **`ANTHROPIC_API_KEY`** — For Anthropic Claude models
-   - Auto-detected provider: `claude`
-   - Models: `claude-3-opus-20240229`, `claude-3-5-sonnet-20241022`, `claude-3-haiku-20240307`, etc.
+   - Auto-detected provider: `claude` (default model: `claude-sonnet-4-5`)
    - Requires: `pip install langchain-anthropic`
 
 **How auto-detection works:**
@@ -68,18 +65,18 @@ The scripts check for API keys in order (OPENAI → GOOGLE → ANTHROPIC). The f
 $env:OPENAI_API_KEY="sk-..."
 python scripts/02_query.py -q "What is RAG?" --agent-mode llm
 
-# Google Gemini (auto-detected from GOOGLE_API_KEY)
+# Google Gemini (auto-detected from GOOGLE_API_KEY; uses gemini-2.5-flash by default)
 $env:GOOGLE_API_KEY="AIza..."
-python scripts/02_query.py -q "What is RAG?" --agent-mode llm --llm-model gemini-pro
+python scripts/02_query.py -q "What is RAG?" --agent-mode llm
 
-# Anthropic Claude (auto-detected from ANTHROPIC_API_KEY)
+# Anthropic Claude (auto-detected from ANTHROPIC_API_KEY; uses claude-sonnet-4-5 by default)
 $env:ANTHROPIC_API_KEY="sk-ant-..."
-python scripts/02_query.py -q "What is RAG?" --agent-mode llm --llm-model claude-3-5-sonnet-20241022
+python scripts/02_query.py -q "What is RAG?" --agent-mode llm
 
 # Force a specific provider (when multiple keys are set)
 $env:OPENAI_API_KEY="sk-..."
 $env:GOOGLE_API_KEY="AIza..."
-python scripts/05_chat_cli.py --provider gemini --llm-model gemini-1.5-flash
+python scripts/05_chat_cli.py --provider gemini
 
 # Explicit API key override
 python scripts/02_query.py -q "Test" --agent-mode llm --api-key "sk-..." --provider openai
@@ -95,7 +92,9 @@ python scripts/02_query.py -q "Test" --agent-mode llm --api-key "sk-..." --provi
 
 The full configuration surface is: these `.env` variables, per-script CLI flags (`--help` on any script), and `rag_content.json` for the chat agent's scope. The YAML files under `configs/` are unused learning templates (see the header comment in each).
 
-Note: The agentic CLI and helper functions reuse the same chat model key; there are no additional secrets required beyond the LLM API key.## Project structure
+Note: The agentic CLI and helper functions reuse the same chat model key; there are no additional secrets required beyond the LLM API key.
+
+## Project structure
 
 | Path | Purpose |
 |------|---------|
@@ -265,6 +264,16 @@ Key components:
 - Retriever: uses the built vector store (`data/chroma`) with `HuggingFaceEmbeddings`.
 - Prompt contract (`build_system_prompt` / `format_context_documents`): persona + grounding rules in the system layer; evidence delimited as untrusted `<documents>` data in the current turn only.
 - Turn handler (`ChatSession.handle_turn`): retrieval failures degrade gracefully, LLM failures keep the session alive, and history stays clean.
+
+## Evaluation: how this project measures quality
+
+No external eval framework (RAGAS, DeepEval, etc.) is used. Evaluation is deliberately layered from cheapest/most-deterministic to most-expensive, and each layer is home-grown and inspectable:
+
+1. **Deterministic lexical heuristics** — `scripts/03_eval.py` scores saved question/answer/context rows offline: an answer is flagged *faithful* when at least 30% of its tokens appear in the retrieved context (`utils/textproc.compute_overlap_ratio`), and *abstain* when the context is too short or too noisy to support any answer. Run it after every chunking/retrieval/prompt change to spot regressions. No LLM calls, no API key needed for `--in` files or `--agent-mode none|pretend`.
+2. **Human-in-the-loop review** — `scripts/06_quiz.py` walks a reviewer through live retrieval results, capturing faithful/abstain judgements, failure tags, and notes into JSONL/CSV; `scripts/report.py` aggregates them into a Markdown digest with per-tag remediation advice (the shared mapping lives in `utils/review_tags.py`). See `docs/eval_guide.md` for the full workflow.
+3. **Offline behavior tests** — the pytest suite (`tests/`) pins the chat orchestration *contract* with fakes and zero API calls: router fallback behavior, evidence delimiting, clean history, and session survival after LLM failures (`tests/test_chat_session.py` doubles as the no-key chat smoke test).
+
+Deliberately not built yet (measure the baseline first): a labeled 50–100 query retrieval/generation eval set, and LLM-as-judge metrics on top of it. Those become worthwhile once the lexical baseline above is being tracked and shows where the real bottleneck is.
 
 ## Testing: run the test suite with pytest
 

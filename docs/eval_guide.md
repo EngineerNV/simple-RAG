@@ -101,21 +101,21 @@ sharing (paste it into docs, issues, or Slack).
 
 ## 4. Act on the Feedback
 
-Use the built-in tag recommendations as a checklist:
+Use the built-in tag recommendations as a checklist (the canonical mapping
+lives in `utils/review_tags.py` and is shared by the quiz and the report):
 
-* **retrieval-miss** — raise `k`, introduce metadata filters, or broaden the
-  corpus.
-* **retrieval-partial** — adjust chunk sizes/overlap so facts do not split across
-  documents.
-* **too-low-k** — increase the CLI `--k` or implement a similarity threshold
-  before truncating.
-* **chunking-issue** — rebuild via `scripts/01_build_index.py` with larger chunks
-  or higher overlap.
-* **prompt-overreach** — tighten `SYSTEM_PROMPT` and include refusal exemplars so
-  the LLM abstains without evidence.
-* **ambiguous-question** — add clarifying prompts or template the answer format.
-* **source-noise** — clean noisy corpus files and rebuild the index.
-* **other** — read the free-form notes for bespoke fixes.
+* **retrieval-miss** — increase `k`, add metadata filters, or expand corpus
+  coverage.
+* **retrieval-partial** — inspect chunk boundaries; try larger chunks or more
+  overlap.
+* **too-low-k** — increase `k` or tune score thresholds before truncating.
+* **chunking-issue** — rebuild the index with bigger chunks or overlap to keep
+  facts together.
+* **prompt-overreach** — tighten the system prompt and add refusal exemplars.
+* **ambiguous-question** — introduce clarifier prompts or request follow-up
+  questions.
+* **source-noise** — clean noisy documents and rebuild the index.
+* **other** — review the free-form notes for bespoke fixes.
 
 ## 5. Iterate
 

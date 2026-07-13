@@ -124,6 +124,11 @@ Useful flags:
   - `01_build_index.py` to print “Documents embedded”.
   - `00_ingest.py` to return ≥2 docs for simple H2-structured input and preserve the H1 title in metadata under `"#"`.
   - `02_query.py` helpers to coerce/format scores and compose messages.
+  - `tests/test_router.py` — router pass-through, low-confidence and error fallbacks to retrieve-and-abstain, prompt contents.
+  - `tests/test_chat_session.py` — the chat contract: `<documents>` evidence (escaped, most-relevant first, never sanitized), history stores only the clean user message, off-topic rejection with static fallback, an LLM failure leaves no history residue and the session survives.
+  - `tests/test_llm_utils.py` — provider auto-detect precedence, per-provider default models, temperature omission, Gemini `max_output_tokens` mapping.
+  - `tests/test_utils_misc.py` — byte-stable system prompt, `SummaryBufferHistory` pruning keeps a human-first history.
+  - All of these run offline with fakes (`tests/fakes.py`) — no API keys.
 
 ## Contribution checklist (for agents)
 
