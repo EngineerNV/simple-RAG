@@ -9,7 +9,6 @@ prompt or retrieval tweaks.
 import argparse
 import csv
 import json
-import os
 import statistics
 import sys
 from importlib import import_module
@@ -295,8 +294,8 @@ def main() -> None:
         
         query_module = _load_query_module()
         provider, api_key = query_module.resolve_provider_and_key(args.api_key, args.provider)
-        
-        if not api_key:
+
+        if args.agent_mode == "llm" and not api_key:
             print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.")
             sys.exit(1)
         

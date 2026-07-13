@@ -13,7 +13,7 @@ import logging
 from typing import Any, Iterable, List, Optional
 
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,10 @@ class SummaryBufferHistory(BaseChatMessageHistory):
         pruned: List[BaseMessage] = []
         # Always keep at least the latest exchange verbatim.
         while len(self._messages) > 2 and self._count_tokens(self._messages) > self.max_token_limit:
+            pruned.append(self._messages.pop(0))
+        # Retained history must start with a human turn — Anthropic and Gemini
+        # reject conversations whose first non-system message is an AI turn.
+        while self._messages and not isinstance(self._messages[0], HumanMessage):
             pruned.append(self._messages.pop(0))
         if pruned:
             self._update_summary(pruned)

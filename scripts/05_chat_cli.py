@@ -1,10 +1,13 @@
 """05_chat_cli.py — playful terminal chat interface backed by the RAG pipeline.
 
-This script turns the retrieval pipeline into an interactive chat experience. It
-keeps a running conversation, maintains a rolling summary via LangChain memory so
-the LLM can carry context, and surfaces the retrieved snippets that ground each
-answer. Per-turn orchestration (routing, retrieval, prompting) lives in
-:mod:`agent_orchestration_helper`; this file only renders the conversation.
+This script turns the retrieval pipeline into an interactive chat experience.
+Conversation memory is a :class:`utils.chat_history.SummaryBufferHistory`
+(recent turns verbatim + an LLM-maintained rolling summary) wired through
+``RunnableWithMessageHistory``. Each turn goes through one structured router
+call (scope + retrieval decision + query rewrite), then a grounded answer with
+retrieved snippets delimited as untrusted ``<documents>`` evidence. Per-turn
+orchestration lives in :mod:`agent_orchestration_helper` (``ChatSession``);
+this file only renders the conversation.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import textwrap
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import List, Sequence
 
 try:  # Optional dependency for convenient local development.
     from dotenv import load_dotenv
@@ -34,7 +37,6 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
-from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -66,19 +68,23 @@ CHROMA_DIR = settings.CHROMA_DIR
 
 
 @dataclass
+class TranscriptTurn:
+    user_message: str
+    answer: str
+    contexts: Sequence[str]
+
+
+@dataclass
 class TranscriptLog:
-    """Tracks retrieved contexts for each user turn."""
+    """Complete record of every successful turn, independent of history pruning."""
 
-    user_contexts: List[Sequence[str]] = field(default_factory=list)
+    turns: List[TranscriptTurn] = field(default_factory=list)
 
-    def add_user_context(self, contexts: Sequence[str]) -> None:
-        self.user_contexts.append(contexts)
+    def add_turn(self, user_message: str, answer: str, contexts: Sequence[str]) -> None:
+        self.turns.append(TranscriptTurn(user_message, answer, contexts))
 
     def reset(self) -> None:
-        self.user_contexts.clear()
-
-    def iter_user_contexts(self) -> Iterable[Sequence[str]]:
-        return iter(self.user_contexts)
+        self.turns.clear()
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -129,29 +135,22 @@ def save_transcript(
     path: Path,
     console: Console,
 ) -> None:
+    """Write the full logged conversation; the transcript log records every
+    successful turn verbatim, so it stays intact even after history pruning."""
     try:
         lines = []
         summary_text = history.moving_summary_buffer.strip()
         if summary_text:
             lines.append("# Conversation summary\n" + summary_text + "\n")
 
-        user_contexts = list(transcript_log.iter_user_contexts())
-        user_index = 0
-
-        for message in history.raw_messages:
-            if isinstance(message, HumanMessage):
-                lines.append(f"## User\n{message.content}\n")
-                if user_index < len(user_contexts) and user_contexts[user_index]:
-                    lines.append("Retrieved contexts:\n")
-                    for ctx in user_contexts[user_index]:
-                        lines.append(f"- {ctx}")
-                    lines.append("")
-                user_index += 1
-            elif isinstance(message, AIMessage):
-                lines.append(f"## Assistant\n{message.content}\n")
-            else:
-                speaker = message.__class__.__name__
-                lines.append(f"## {speaker}\n{message.content}\n")
+        for turn in transcript_log.turns:
+            lines.append(f"## User\n{turn.user_message}\n")
+            if turn.contexts:
+                lines.append("Retrieved contexts:\n")
+                for ctx in turn.contexts:
+                    lines.append(f"- {ctx}")
+                lines.append("")
+            lines.append(f"## Assistant\n{turn.answer}\n")
         path.write_text("\n".join(lines), encoding="utf-8")
         console.print(f"[green]Transcript written to {path}[/green]")
     except Exception as exc:  # pragma: no cover - filesystem failure
@@ -288,8 +287,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         if result.error:
             # The failed turn left no residue in history; keep the session alive.
             console.print(f"[red]LLM call failed: {result.error}[/red]")
+        else:
+            transcript_log.add_turn(user_message, result.answer, result.context_blocks)
 
-        transcript_log.add_user_context(result.context_blocks)
         if result.used_rag and show_context:
             render_context_table(result.results, console)
 

@@ -99,3 +99,22 @@ def test_load_chat_model_omits_temperature_when_none(monkeypatch: pytest.MonkeyP
     captured.clear()
     llm_utils.load_chat_model("openai", "gpt-test", "sk-x", temperature=0.4)
     assert captured["temperature"] == 0.4
+
+
+def test_load_chat_model_gemini_uses_max_output_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    class FakeChatGoogleGenerativeAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import sys
+    import types
+
+    fake_module = types.ModuleType("langchain_google_genai")
+    fake_module.ChatGoogleGenerativeAI = FakeChatGoogleGenerativeAI
+    monkeypatch.setitem(sys.modules, "langchain_google_genai", fake_module)
+
+    llm_utils.load_chat_model("gemini", "gemini-test", "sk-g", max_tokens=1234)
+    assert captured["max_output_tokens"] == 1234
+    assert "max_tokens" not in captured

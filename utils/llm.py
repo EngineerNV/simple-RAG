@@ -145,7 +145,11 @@ def load_chat_model(
             raise MissingProviderDependencyError(
                 "Missing optional dependency 'langchain-google-genai'. Install it with `pip install langchain-google-genai`."
             ) from exc
-        return ChatGoogleGenerativeAI(**common_kwargs, google_api_key=api_key)
+        # Gemini's canonical token-cap field is max_output_tokens (the
+        # max_tokens alias is not supported on every package version).
+        gemini_kwargs = dict(common_kwargs)
+        gemini_kwargs["max_output_tokens"] = gemini_kwargs.pop("max_tokens")
+        return ChatGoogleGenerativeAI(**gemini_kwargs, google_api_key=api_key)
 
     if provider == "claude":
         try:

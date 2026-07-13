@@ -13,9 +13,16 @@ import argparse
 import csv
 import json
 import statistics
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable, List, Mapping, MutableMapping, Sequence
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from utils.review_tags import TAG_REMEDIATION
 
 
 def load_jsonl(path: Path) -> List[MutableMapping[str, object]]:
@@ -182,16 +189,7 @@ def print_console_summary(summary: Mapping[str, object]) -> None:
 
 
 # Map quiz tags to suggested remediation steps surfaced in the Markdown output.
-ACTIONABLE_INTERVENTIONS = {
-    "retrieval-miss": "Increase k, add metadata filters, or expand corpus coverage.",
-    "retrieval-partial": "Review chunk segmentation or add follow-up retrieval passes.",
-    "too-low-k": "Bump k or implement score thresholds to widen the net.",
-    "chunking-issue": "Rebuild index with larger chunks and overlapping windows.",
-    "prompt-overreach": "Add refusal exemplars and tighten the system prompt.",
-    "ambiguous-question": "Introduce clarifier prompts or request follow-up questions.",
-    "source-noise": "Clean the corpus or adjust filters to drop noisy documents.",
-    "other": "Review notes column for bespoke actions.",
-}
+ACTIONABLE_INTERVENTIONS = TAG_REMEDIATION
 
 
 def write_markdown(path: Path, summary: Mapping[str, object]) -> None:

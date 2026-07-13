@@ -231,12 +231,17 @@ def build_system_prompt(specialization_list: str = SPECIALIZATION_LIST) -> str:
 
 
 def format_context_documents(results: Sequence[Tuple[Any, float]]) -> str:
-    """Wrap retrieved chunks in <documents> tags, most relevant first."""
+    """Wrap retrieved chunks in <documents> tags, most relevant first.
+
+    Snippet text has ``<`` escaped so corpus content can never forge or close
+    the evidence delimiters the grounding rules rely on.
+    """
     if not results:
         return ""
     lines: List[str] = ["<documents>"]
     for idx, (doc, score) in enumerate(results):
         snippet = clean_snippet(getattr(doc, "page_content", "") or "") or "(empty snippet)"
+        snippet = snippet.replace("<", "&lt;")
         metadata = getattr(doc, "metadata", {}) or {}
         attrs = f'index="{idx}" source="{metadata.get("source", "unknown")}"'
         if isinstance(score, (int, float)):
@@ -396,7 +401,12 @@ class ChatSession:
 
     def _history_excerpt(self, max_messages: int = 8, max_chars: int = 400) -> str:
         try:
-            messages = list(getattr(self.history_adapter, "messages", []) or [])[-max_messages:]
+            # Prefer raw_messages so the rolling summary (already passed to the
+            # router separately) isn't duplicated inside the excerpt.
+            source = getattr(self.history_adapter, "raw_messages", None)
+            if source is None:
+                source = getattr(self.history_adapter, "messages", []) or []
+            messages = list(source)[-max_messages:]
         except Exception:
             return ""
         joined = "\n".join(

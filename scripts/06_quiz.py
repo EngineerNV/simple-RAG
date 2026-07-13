@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import random
 import sys
 import textwrap
@@ -38,6 +37,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from utils.review_tags import TAG_REMEDIATION
 from utils.textproc import compute_overlap_ratio
 from utils.warnings_filter import suppress_langchain_warnings
 
@@ -282,11 +282,12 @@ def build_review_record(
             else:
                 serialisable_meta[key] = str(value)
         snippet = query_module.clean_snippet(doc.page_content)
+        numeric_score = float(score) if score is not None else 0.0
         contexts.append(
-            RetrievedContext(rank=idx, score=float(score), metadata=serialisable_meta, snippet=snippet)
+            RetrievedContext(rank=idx, score=numeric_score, metadata=serialisable_meta, snippet=snippet)
         )
         snippets.append(snippet)
-        scores.append(float(score))
+        scores.append(numeric_score)
 
     answer = generate_answer(
         query_module=query_module,
@@ -330,16 +331,7 @@ TAG_OPTIONS = [
     "other",
 ]
 
-TAG_ADVICE = {
-    "retrieval-miss": "Raise k, add metadata filters, or expand the corpus.",
-    "retrieval-partial": "Inspect chunk boundaries; try larger chunks or more overlap.",
-    "too-low-k": "Increase k or tune score thresholds before truncating.",
-    "chunking-issue": "Rebuild the index with bigger chunks or overlap to keep facts together.",
-    "prompt-overreach": "Tighten the system prompt and add refusal exemplars.",
-    "ambiguous-question": "Introduce clarifier prompts or request follow-up questions.",
-    "source-noise": "Clean noisy documents and rebuild the index.",
-    "other": "Review the free-form notes for bespoke fixes.",
-}
+TAG_ADVICE = TAG_REMEDIATION
 
 
 def prompt_for_tags(current: List[str]) -> List[str]:
@@ -609,8 +601,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
 
     provider, api_key = query_module.resolve_provider_and_key(args.api_key, args.provider)
-    
-    if not api_key:
+
+    if args.agent_mode == "llm" and not api_key:
         print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.", file=sys.stderr)
         sys.exit(1)
 
