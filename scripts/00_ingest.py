@@ -37,8 +37,12 @@ CHUNK_OVERLAP_TOKENS = int(os.environ.get("INGEST_CHUNK_OVERLAP", "80"))
 
 # ---------------------------- Helpers ----------------------------
 def list_corpus_files(corpus_dir: str) -> List[str]:
+    # Only .md content is supported for ingestion (see Agent.MD content policy);
+    # a stray non-markdown file dropped in the corpus dir is silently skipped
+    # rather than being embedded as if it were prose.
     return [os.path.join(corpus_dir, f) for f in os.listdir(corpus_dir)
-            if os.path.isfile(os.path.join(corpus_dir, f)) and not f.startswith('.')]
+            if os.path.isfile(os.path.join(corpus_dir, f)) and not f.startswith('.')
+            and f.lower().endswith('.md')]
 
 
 def read_text(path: str) -> str:
@@ -177,7 +181,11 @@ def ingest() -> List[Document]:
         return []
     docs_all = []
     for p in files:
-        docs = list(process_file(p))
+        try:
+            docs = list(process_file(p))
+        except UnicodeDecodeError as exc:
+            logger.warning("Skipping %s: not valid UTF-8 text (%s).", p, exc)
+            continue
         # Clarify that we produce token-bounded chunks (not original file sections).
         print(
             f"{os.path.basename(p)} -> {len(docs)} chunks (token-bounded, chunk_size={CHUNK_SIZE_TOKENS}, overlap={CHUNK_OVERLAP_TOKENS})"
