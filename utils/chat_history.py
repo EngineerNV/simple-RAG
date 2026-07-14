@@ -51,6 +51,10 @@ class SummaryBufferHistory(BaseChatMessageHistory):
 
     @property
     def messages(self) -> List[BaseMessage]:
+        return list(self._budgeted_messages())
+
+    def _budgeted_messages(self) -> List[BaseMessage]:
+        """Raw turns plus the summary preamble, i.e. what a model call actually sees."""
         if self.moving_summary_buffer:
             preamble = SystemMessage(
                 content="Conversation summary so far:\n" + self.moving_summary_buffer
@@ -71,12 +75,17 @@ class SummaryBufferHistory(BaseChatMessageHistory):
         self.moving_summary_buffer = ""
 
     def prune(self) -> None:
-        """Fold the oldest turns into the summary once over the token budget."""
-        if self._count_tokens(self._messages) <= self.max_token_limit:
+        """Fold the oldest turns into the summary once over the token budget.
+
+        Counts the summary preamble too — it's prepended to every model call,
+        so a budget check against the raw tail alone understates what's
+        actually sent once the summary itself has grown large.
+        """
+        if self._count_tokens(self._budgeted_messages()) <= self.max_token_limit:
             return
         pruned: List[BaseMessage] = []
         # Always keep at least the latest exchange verbatim.
-        while len(self._messages) > 2 and self._count_tokens(self._messages) > self.max_token_limit:
+        while len(self._messages) > 2 and self._count_tokens(self._budgeted_messages()) > self.max_token_limit:
             pruned.append(self._messages.pop(0))
         # Retained history must start with a human turn — Anthropic and Gemini
         # reject conversations whose first non-system message is an AI turn.

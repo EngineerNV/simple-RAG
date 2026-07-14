@@ -63,7 +63,9 @@ def _load_agent_content_from_json() -> Tuple[str, List[str]]:
     cfg_path = Path(__file__).with_name("rag_content.json")
     try:
         with cfg_path.open("r", encoding="utf-8") as f:
-            data = json.load(f) or {}
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError(f"expected a JSON object, got {type(data).__name__}")
     except FileNotFoundError:
         return DEFAULT_RAG_TOPIC_INVENTORY, DEFAULT_SPECIALIZATION_TOPICS
     except (OSError, json.JSONDecodeError, ValueError) as exc:
