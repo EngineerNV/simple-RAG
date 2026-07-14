@@ -195,11 +195,11 @@ def build_chat_panel(turns: List[DebugChatTurn], max_lines: int = 40) -> Panel:
         asst_lines = textwrap.wrap(turn.answer, width=_CHAT_WRAP) or [""]
         asst_style = "bold red" if turn.result.error else "bold green"
         lines.append(f"[bold cyan]You:[/bold cyan] {you_lines[0]}")
-        for l in you_lines[1:]:
-            lines.append(f"     {l}")
+        for wrapped_line in you_lines[1:]:
+            lines.append(f"     {wrapped_line}")
         lines.append(f"[{asst_style}]Asst:[/{asst_style}] {asst_lines[0]}")
-        for l in asst_lines[1:]:
-            lines.append(f"      {l}")
+        for wrapped_line in asst_lines[1:]:
+            lines.append(f"      {wrapped_line}")
         lines.append("")
 
     # Trim to the most recent max_lines

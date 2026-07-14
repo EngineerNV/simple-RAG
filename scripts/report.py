@@ -153,7 +153,7 @@ def render_distribution(values: Sequence[float]) -> str:
         idx = min(len(counts) - 1, max(0, int(value * 5)))
         counts[idx] += 1
     lines = []
-    for label, count in zip(bucket_labels, counts):
+    for label, count in zip(bucket_labels, counts, strict=True):
         bar = "#" * count
         lines.append(f"[{label}] {count:>3}: {bar}")
     return "\n".join(lines)

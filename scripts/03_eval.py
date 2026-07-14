@@ -36,13 +36,13 @@ def load_eval_data(filepath: Path) -> List[Mapping[str, str]]:
         if not isinstance(data, list):
             raise ValueError(f"{filepath} must contain a JSON list of QA objects, got {type(data).__name__}.")
         return data
-    else:
-        out = []
-        with open(filepath, "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                out.append({"question": row.get("question"), "answer": row.get("answer"), "context": row.get("context")})
-        return out
+
+    out = []
+    with open(filepath, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            out.append({"question": row.get("question"), "answer": row.get("answer"), "context": row.get("context")})
+    return out
 
 
 def _normalise_context(context: Iterable[str] | str | None) -> List[str]:
@@ -81,9 +81,7 @@ def should_abstain(context: Iterable[str], min_length: int = 30, min_ratio: floa
         return True
     # simple heuristic: if average token length is tiny, abstain
     avg_token_len = sum(len(t) for t in ctx_tokens) / len(ctx_tokens)
-    if avg_token_len < 2:
-        return True
-    return False
+    return avg_token_len < 2
 
 
 def evaluate_qa_pair(qa: Mapping[str, object]) -> Mapping[str, object]:
@@ -123,7 +121,6 @@ def save_eval_report(results: List[Mapping[str, object]], out_path: Path) -> Non
 
 
 def print_eval_summary(results: List[Mapping[str, object]]) -> None:
-    total = len(results) or 1
     faithful = sum(1 for r in results if r.get("faithful"))
     abstain = sum(1 for r in results if r.get("abstain"))
     ratios = [float(r.get("overlap_ratio", 0.0)) for r in results]
@@ -293,14 +290,14 @@ def main() -> None:
         questions = load_question_file(question_file)
         if not questions:
             raise ValueError("Question file was empty; nothing to evaluate.")
-        
+
         query_module = _load_query_module()
         provider, api_key = query_module.resolve_provider_and_key(args.api_key, args.provider)
 
         if args.agent_mode == "llm" and not api_key:
             print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.")
             sys.exit(1)
-        
+
         raw_examples = generate_predictions(
             questions=questions,
             k=args.k,

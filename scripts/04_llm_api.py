@@ -177,7 +177,7 @@ def main() -> None:
         contexts.extend(load_context_from_file(args.context_file))
 
     provider, api_key = resolve_provider_and_key(args.api_key, args.provider)
-    
+
     if not api_key:
         print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.")
         sys.exit(1)

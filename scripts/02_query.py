@@ -39,7 +39,6 @@ from utils.llm import (
     MissingAPIKeyError,
     MissingProviderDependencyError,
     UnsupportedProviderError,
-    auto_detect_provider,
     load_chat_model,
     resolve_model,
     resolve_provider_and_key,
@@ -85,8 +84,7 @@ def load_vector_store(persist_dir: Path, embedding_model: HuggingFaceEmbeddings)
 
     if not persist_dir.exists():
         raise FileNotFoundError(f"Chroma persist directory not found: {persist_dir}")
-    store = Chroma(persist_directory=str(persist_dir), embedding_function=embedding_model)
-    return store
+    return Chroma(persist_directory=str(persist_dir), embedding_function=embedding_model)
 
 
 def create_retrieval_store(

@@ -21,6 +21,7 @@ Notes:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shutil
 import stat
@@ -71,11 +72,9 @@ def clear_directory(dir_path: Path, *, dry_run: bool = False) -> List[Path]:
         if child.is_dir():
             shutil.rmtree(child, onerror=_on_rm_error)
         else:
-            try:
-                # Make writable then unlink
+            # Make writable then unlink
+            with contextlib.suppress(Exception):
                 os.chmod(child, stat.S_IWRITE)
-            except Exception:
-                pass
             child.unlink(missing_ok=True)
     return deleted
 
@@ -122,8 +121,8 @@ def ensure_under(parent: Path, child: Path) -> None:
     """Ensure child is within parent to prevent accidental deletions."""
     try:
         child.resolve().relative_to(parent.resolve())
-    except Exception:
-        raise ValueError(f"Refusing to operate outside {parent}: {child}")
+    except Exception as exc:
+        raise ValueError(f"Refusing to operate outside {parent}: {child}") from exc
 
 
 def main(argv: List[str]) -> int:

@@ -627,8 +627,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         records.append(record)
 
-    existing_map = {entry_id: entry for entry_id, entry in existing_by_id.items()}
-    interactive_loop(records, existing_map, jsonl_path, csv_path, page_width=args.page_width)
+    interactive_loop(records, existing_by_id, jsonl_path, csv_path, page_width=args.page_width)
 
 
 if __name__ == "__main__":
