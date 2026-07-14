@@ -33,7 +33,9 @@ def load_eval_data(filepath: Path) -> List[Mapping[str, str]]:
     if filepath.suffix.lower() == ".json":
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return list(data)
+        if not isinstance(data, list):
+            raise ValueError(f"{filepath} must contain a JSON list of QA objects, got {type(data).__name__}.")
+        return data
     else:
         out = []
         with open(filepath, "r", encoding="utf-8", newline="") as f:

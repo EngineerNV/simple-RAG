@@ -46,6 +46,13 @@ def test_load_eval_data_supports_json_and_csv(tmp_path: Path) -> None:
     assert data_csv[0]["question"] == "q"
 
 
+def test_load_eval_data_rejects_non_list_json(tmp_path: Path) -> None:
+    json_path = tmp_path / "eval.json"
+    json_path.write_text(json.dumps({"question": "Q", "answer": "A", "context": "C"}), encoding="utf-8")
+    with pytest.raises(ValueError, match="must contain a JSON list"):
+        eval_module.load_eval_data(json_path)
+
+
 def test_load_question_file_handles_csv(tmp_path: Path) -> None:
     csv_path = tmp_path / "questions.csv"
     csv_path.write_text("question\nWhat is RAG?\n\n", encoding="utf-8")

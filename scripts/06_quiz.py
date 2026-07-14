@@ -566,11 +566,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     jsonl_path = Path(args.out)
     csv_path = jsonl_path.with_suffix(".csv")
 
-    existing_entries_list = load_existing_reviews(jsonl_path) if args.resume else []
-    if jsonl_path.exists() and not args.resume and existing_entries_list:
+    existing_entries_list = load_existing_reviews(jsonl_path) if jsonl_path.exists() else []
+    if existing_entries_list and not args.resume:
         raise RuntimeError(
-            f"Output file {jsonl_path} already exists. Pass --resume to append or remove the file first."
+            f"Output file {jsonl_path} already has {len(existing_entries_list)} saved review(s). "
+            "Pass --resume to append or remove the file first."
         )
+    if not args.resume:
+        existing_entries_list = []
     existing_by_id: Dict[str, MutableMapping[str, object]] = {}
     for entry in existing_entries_list:
         entry_id = str(entry.get("id"))
