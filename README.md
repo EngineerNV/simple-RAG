@@ -99,8 +99,8 @@ Note: The agentic CLI and helper functions reuse the same chat model key; there 
 | Path | Purpose |
 |------|---------|
 | `scripts/00_ingest.py` | Loads markdown files from `data/corpus/`, splits them into token-sized chunks with overlap, and previews the resulting `Document` objects. |
-| `scripts/01_build_index.py` | Embeds the ingested chunks with `HuggingFaceEmbeddings`, rebuilds `data/chroma/`, and prints a build summary. |
-| `scripts/02_query.py` | Connects to the persisted Chroma store and exposes the retrieval CLI described above. |
+| `scripts/01_build_index.py` | Embeds the ingested chunks with `HuggingFaceEmbeddings`, rebuilds `data/chroma/`, and prints a build summary. Also records the embedding model name in a small `_index_meta.json` sidecar. |
+| `scripts/02_query.py` | Connects to the persisted Chroma store and exposes the retrieval CLI described above. Warns if the querying embedding model doesn't match the one recorded in `_index_meta.json`. |
 | `scripts/03_eval.py` | Scores saved question/answer/context rows with lexical heuristics and prints aggregate metrics. |
 | `scripts/06_quiz.py` | Interactive reviewer loop for collecting human judgements (faithful/abstain/tags). |
 | `scripts/04_llm_api.py` | Standalone helper for formatting prompts and calling a chat model with optional context snippets. |

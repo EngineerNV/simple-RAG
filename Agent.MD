@@ -50,9 +50,9 @@ Core pipeline (numbered in run order):
 
 1) `scripts/00_ingest.py` — token-aware chunking of Markdown files from `data/corpus/` (+ small H2 fallback for tiny files). Emits LangChain `Document` chunks with `chunk_index/chunk_count` and `source` metadata. Only `.md` content is supported for now.
 
-2) `scripts/01_build_index.py` — embeds chunks with MiniLM (`HuggingFaceEmbeddings`) and (re)creates `data/chroma/`. Summary prints collection, persist dir, Documents embedded, and a preview of metadata keys; also echoes ingest chunk size/overlap.
+2) `scripts/01_build_index.py` — embeds chunks with MiniLM (`HuggingFaceEmbeddings`) and (re)creates `data/chroma/`. Summary prints collection, persist dir, Documents embedded, and a preview of metadata keys; also echoes ingest chunk size/overlap. Also writes a small `_index_meta.json` sidecar next to the store recording the embedding model name (filename in `utils.settings.INDEX_METADATA_FILENAME`).
 
-3) `scripts/02_query.py` — connects to the persisted Chroma store; retrieval modes: `none`, `pretend`, `llm`. Includes a lightweight reranker that blends retriever score with lexical overlap and stores `combined_score` in `Document.metadata` for display.
+3) `scripts/02_query.py` — connects to the persisted Chroma store; retrieval modes: `none`, `pretend`, `llm`. Includes a lightweight reranker that blends retriever score with lexical overlap and stores `combined_score` in `Document.metadata` for display. `load_vector_store` reads the `_index_meta.json` sidecar and emits a `RuntimeWarning` if the querying embedding model doesn't match the one that built the index (silent if the sidecar is missing/unreadable or either model name is unavailable).
 
 4) `scripts/03_eval.py` — lexical heuristics over saved rows (faithfulness/abstain).
 
@@ -125,12 +125,15 @@ Useful flags:
 
 - Tests expect:
   - `01_build_index.py` to print “Documents embedded”.
-  - `00_ingest.py` to return ≥2 docs for simple H2-structured input and preserve the H1 title in metadata under `"#"`.
-  - `02_query.py` helpers to coerce/format scores and compose messages.
+  - `00_ingest.py` to return ≥2 docs for simple H2-structured input and preserve the H1 title in metadata under `"#"`; non-`.md` files are skipped and a file that fails UTF-8 decoding is skipped (with a warning) rather than crashing the whole ingest run.
+  - `02_query.py` helpers to coerce/format scores and compose messages; `load_vector_store` warns (doesn't raise) on an embedding-model mismatch against the index's `_index_meta.json` sidecar and stays silent when the sidecar is absent or the models match.
+  - `01_build_index.py`'s `persist_chroma` writes that `_index_meta.json` sidecar when the embeddings object exposes `model_name`, and skips it silently otherwise.
+  - `03_eval.py`'s `load_eval_data` rejects a JSON eval file whose top level isn't a list instead of silently treating dict keys as records.
+  - `06_quiz.py`'s `main` refuses to overwrite an existing non-empty review output file unless `--resume` is passed (`tests/test_quiz.py`).
   - `tests/test_router.py` — router pass-through, low-confidence and error fallbacks to retrieve-and-abstain, prompt contents.
   - `tests/test_chat_session.py` — the chat contract: `<documents>` evidence (escaped, most-relevant first, never sanitized), history stores only the clean user message, off-topic rejection with static fallback, an LLM failure leaves no history residue and the session survives.
   - `tests/test_llm_utils.py` — provider auto-detect precedence, per-provider default models, temperature omission, Gemini `max_output_tokens` mapping.
-  - `tests/test_utils_misc.py` — byte-stable system prompt, `SummaryBufferHistory` pruning keeps a human-first history.
+  - `tests/test_utils_misc.py` — byte-stable system prompt, `SummaryBufferHistory` pruning keeps a human-first history and counts the summary preamble itself against the token budget.
   - `tests/test_debug_chat.py` — debug TUI panels (metrics panel distinguishes empty retrieval from RAG-skipped, survives non-numeric scores, error turns stay visible) and `handle_turn` per-stage timings on success/error/rejection paths.
   - All of these run offline with fakes (`tests/fakes.py`) — no API keys.
 
