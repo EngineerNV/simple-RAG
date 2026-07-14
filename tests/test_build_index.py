@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 from typing import Iterable, List
 
@@ -16,6 +17,11 @@ class DummyEmbeddings:
 
     def embed_query(self, text: str) -> List[float]:  # pragma: no cover - interface placeholder
         return [0.1] * 3
+
+
+class NamedDummyEmbeddings(DummyEmbeddings):
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
 
 
 class FakeCollection:
@@ -78,6 +84,29 @@ def test_persist_chroma_sanitizes_metadata(monkeypatch: pytest.MonkeyPatch, tmp_
     assert all(isinstance(md["tags"], str) for md in store.metadatas if "tags" in md)
     assert chroma_dir.exists()
     assert build_index._RUN_METADATA["doc_count"] == len(docs)
+
+
+def test_persist_chroma_writes_embedding_model_sidecar(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    chroma_dir = tmp_path / "chroma"
+    monkeypatch.setattr(build_index, "CHROMA_DIR", chroma_dir)
+    monkeypatch.setattr(build_index, "Chroma", FakeChroma)
+
+    build_index.persist_chroma(_make_docs(), NamedDummyEmbeddings("some/embed-model"))
+
+    meta_path = chroma_dir / build_index.settings.INDEX_METADATA_FILENAME
+    assert json.loads(meta_path.read_text(encoding="utf-8")) == {"embedding_model": "some/embed-model"}
+
+
+def test_persist_chroma_skips_sidecar_when_model_name_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    chroma_dir = tmp_path / "chroma"
+    monkeypatch.setattr(build_index, "CHROMA_DIR", chroma_dir)
+    monkeypatch.setattr(build_index, "Chroma", FakeChroma)
+
+    build_index.persist_chroma(_make_docs(), DummyEmbeddings())
+
+    assert not (chroma_dir / build_index.settings.INDEX_METADATA_FILENAME).exists()
 
 
 def test_persist_chroma_recreates_existing_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

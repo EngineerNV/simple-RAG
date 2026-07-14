@@ -1,12 +1,66 @@
 from __future__ import annotations
 
 import importlib
+import json
+import warnings
 
 import pytest
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 
 query_module = importlib.import_module("scripts.02_query")
+
+
+class FakeChroma:
+    def __init__(self, persist_directory: str, embedding_function) -> None:
+        self.persist_directory = persist_directory
+        self.embedding_function = embedding_function
+
+
+class NamedEmbeddings:
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
+
+
+def test_load_vector_store_warns_on_embedding_model_mismatch(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    persist_dir = tmp_path / "chroma"
+    persist_dir.mkdir()
+    (persist_dir / "_index_meta.json").write_text(
+        json.dumps({"embedding_model": "model-a"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(query_module, "Chroma", FakeChroma)
+
+    with pytest.warns(RuntimeWarning, match="model-a"):
+        query_module.load_vector_store(persist_dir, NamedEmbeddings("model-b"))
+
+
+def test_load_vector_store_silent_when_embedding_model_matches(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    persist_dir = tmp_path / "chroma"
+    persist_dir.mkdir()
+    (persist_dir / "_index_meta.json").write_text(
+        json.dumps({"embedding_model": "model-a"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(query_module, "Chroma", FakeChroma)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        query_module.load_vector_store(persist_dir, NamedEmbeddings("model-a"))
+
+
+def test_load_vector_store_silent_without_sidecar_file(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    persist_dir = tmp_path / "chroma"
+    persist_dir.mkdir()
+    monkeypatch.setattr(query_module, "Chroma", FakeChroma)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        query_module.load_vector_store(persist_dir, NamedEmbeddings("model-a"))
 
 
 class StubStore:

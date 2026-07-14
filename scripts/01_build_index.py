@@ -130,6 +130,8 @@ def persist_chroma(processed_docs: Iterable[Document], embedding_model: Embeddin
         persist_directory=str(CHROMA_DIR),
     )
 
+    _write_index_metadata(embedding_model)
+
     _RUN_METADATA.update(
         {
             "doc_count": len(processed_documents),
@@ -139,6 +141,19 @@ def persist_chroma(processed_docs: Iterable[Document], embedding_model: Embeddin
     )
 
     return store
+
+
+def _write_index_metadata(embedding_model: Embeddings) -> None:
+    """Record which embedding model built this index so query time can detect a mismatch."""
+
+    model_name = getattr(embedding_model, "model_name", None)
+    if not model_name:
+        return
+    meta_path = CHROMA_DIR / settings.INDEX_METADATA_FILENAME
+    try:
+        meta_path.write_text(json.dumps({"embedding_model": model_name}), encoding="utf-8")
+    except OSError:
+        logger.debug("Could not write index metadata sidecar file.")
 
 
 def summarize_run(store: Chroma) -> None:

@@ -10,6 +10,7 @@ your index before integrating richer agents.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 # Optional dependency; fall back to a no-op when not installed.
 try:
@@ -79,11 +80,37 @@ class LLMResult:
     raw_response: object
     usage: dict | None
 
+def _warn_if_embedding_model_mismatch(persist_dir: Path, embedding_model: HuggingFaceEmbeddings) -> None:
+    """Warn when the index was built with a different embedding model than we're querying with.
+
+    A mismatch silently produces meaningless similarity scores (or an outright
+    dimension error), so surface it early rather than letting a user puzzle
+    over bad retrieval results.
+    """
+    meta_path = persist_dir / settings.INDEX_METADATA_FILENAME
+    if not meta_path.exists():
+        return
+    try:
+        recorded = json.loads(meta_path.read_text(encoding="utf-8")).get("embedding_model")
+    except (OSError, json.JSONDecodeError):
+        return
+    current = getattr(embedding_model, "model_name", None)
+    if recorded and current and recorded != current:
+        warnings.warn(
+            f"Index at {persist_dir} was built with embedding model '{recorded}' but this run is "
+            f"querying with '{current}'. Results may be meaningless. Rebuild the index or pass "
+            "--embedding-model to match.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
 def load_vector_store(persist_dir: Path, embedding_model: HuggingFaceEmbeddings) -> Chroma:
     """Connect to the Chroma collection built during the indexing milestone."""
 
     if not persist_dir.exists():
         raise FileNotFoundError(f"Chroma persist directory not found: {persist_dir}")
+    _warn_if_embedding_model_mismatch(persist_dir, embedding_model)
     return Chroma(persist_directory=str(persist_dir), embedding_function=embedding_model)
 
 

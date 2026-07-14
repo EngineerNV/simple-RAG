@@ -27,3 +27,8 @@ def _resolve_chroma_dir() -> Path:
 CHROMA_DIR = _resolve_chroma_dir()
 
 DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Sidecar file written alongside the Chroma store recording which embedding
+# model built it, so query-time can warn on a mismatch instead of returning
+# silently meaningless similarity scores (or a dimension-mismatch crash).
+INDEX_METADATA_FILENAME = "_index_meta.json"
