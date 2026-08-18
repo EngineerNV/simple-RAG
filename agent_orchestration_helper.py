@@ -278,6 +278,7 @@ def apply_rewrite_and_retrieve(
     rag_topics: Optional[str] = None,
     k: int = 3,
     use_namespace_filter: bool = False,
+    rerank_fn: Optional[Any] = None,
 ) -> Tuple[QueryRewrite, Sequence[Tuple[Any, float]]]:
     rewrite = rewrite_for_retrieval(
         rewriter_llm=rewriter_llm,
@@ -287,6 +288,12 @@ def apply_rewrite_and_retrieve(
     )
     query = rewrite.query or user_message
     results = retrieve_contexts_fn(store, query, k)
+    if rerank_fn is not None:
+        try:
+            results = rerank_fn(results, query)
+        except Exception:
+            # Reranker is best-effort; fall back to the original retriever ordering.
+            pass
     return rewrite, results
 
 def build_user_payload(

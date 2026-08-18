@@ -40,7 +40,6 @@ from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
 
 from agent_orchestration_helper import (
     RAG_TOPIC_INVENTORY,
@@ -65,6 +64,7 @@ create_retrieval_store = query_module.create_retrieval_store  # type: ignore[att
 load_chat_model = query_module.load_chat_model  # type: ignore[attr-defined]
 compose_user_prompt = query_module.compose_user_prompt  # type: ignore[attr-defined]
 retrieve_contexts = query_module.retrieve_contexts  # type: ignore[attr-defined]
+rerank_results = query_module.rerank_results  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 
@@ -93,19 +93,25 @@ CHROMA_DIR = Path("data") / "chroma"
 
 
 @dataclass
+class TranscriptTurn:
+    """A single user/assistant exchange, with the contexts retrieved for it."""
+
+    user_message: str
+    answer: str
+    contexts: Sequence[str] = field(default_factory=list)
+
+
+@dataclass
 class TranscriptLog:
-    """Tracks retrieved contexts for each user turn."""
+    """Tracks each user/assistant turn, independent of chat-memory pruning."""
 
-    user_contexts: List[Sequence[str]] = field(default_factory=list)
+    turns: List[TranscriptTurn] = field(default_factory=list)
 
-    def add_user_context(self, contexts: Sequence[str]) -> None:
-        self.user_contexts.append(contexts)
+    def add_turn(self, user_message: str, answer: str, contexts: Sequence[str]) -> None:
+        self.turns.append(TranscriptTurn(user_message=user_message, answer=answer, contexts=contexts))
 
     def reset(self) -> None:
-        self.user_contexts.clear()
-
-    def iter_user_contexts(self) -> Iterable[Sequence[str]]:
-        return iter(self.user_contexts)
+        self.turns.clear()
 
 
 class SummaryHistoryAdapter(BaseChatMessageHistory):
@@ -212,8 +218,9 @@ def format_contexts(results) -> List[str]:
             combined = getattr(doc, "metadata", {}).get("combined_score")
         except Exception:
             combined = None
+        score_display = f"{score:.3f}" if score is not None else "n/a"
         source_label = (
-            f"[source {idx}] score={score:.3f} rerank={combined:.3f}" if combined is not None else f"[source {idx}] score={score:.3f}"
+            f"[source {idx}] score={score_display} rerank={combined:.3f}" if combined is not None else f"[source {idx}] score={score_display}"
         )
         if snippet:
             formatted.append(f"{source_label}\n{snippet}")
@@ -238,10 +245,11 @@ def render_context_table(results, console: Console) -> None:
             combined = getattr(doc, "metadata", {}).get("combined_score")
         except Exception:
             combined = None
+        score_display = f"{score:.3f}" if score is not None else "n/a"
         if combined is not None:
-            header = f"[{idx}] score={score:.3f} rerank={combined:.3f}\n{meta_bits}"
+            header = f"[{idx}] score={score_display} rerank={combined:.3f}\n{meta_bits}"
         else:
-            header = f"[{idx}] score={score:.3f}\n{meta_bits}"
+            header = f"[{idx}] score={score_display}\n{meta_bits}"
         table.add_row(header, textwrap.fill(snippet, width=80))
     console.print(table)
 
@@ -256,33 +264,21 @@ def save_transcript(
         lines = []
         summary_text = memory.moving_summary_buffer.strip()
         if summary_text:
-            lines.append("# Conversation summary\n" + summary_text + "\n")
+            lines.append("# Conversation summary (older turns folded in by memory)\n" + summary_text + "\n")
 
-        user_contexts = list(transcript_log.iter_user_contexts())
-        user_index = 0
-        history_messages = memory.load_memory_variables({}).get(memory.memory_key, [])
-
-        for message in history_messages:
-            if (
-                isinstance(message, memory.summary_message_cls)
-                and message.content == memory.moving_summary_buffer
-            ):
-                # The summary is already recorded above; skip the placeholder message.
-                continue
-
-            if isinstance(message, HumanMessage):
-                lines.append(f"## User\n{message.content}\n")
-                if user_index < len(user_contexts) and user_contexts[user_index]:
-                    lines.append("Retrieved contexts:\n")
-                    for ctx in user_contexts[user_index]:
-                        lines.append(f"- {ctx}")
-                    lines.append("")
-                user_index += 1
-            elif isinstance(message, AIMessage):
-                lines.append(f"## Assistant\n{message.content}\n")
-            else:
-                speaker = message.__class__.__name__
-                lines.append(f"## {speaker}\n{message.content}\n")
+        # Read straight from transcript_log rather than reconstructing from
+        # ``memory``: ConversationSummaryBufferMemory prunes older messages into
+        # the summary above, so its message list is a moving suffix of the full
+        # conversation and can't be zipped positionally against a same-length
+        # per-turn context list.
+        for turn in transcript_log.turns:
+            lines.append(f"## User\n{turn.user_message}\n")
+            if turn.contexts:
+                lines.append("Retrieved contexts:\n")
+                for ctx in turn.contexts:
+                    lines.append(f"- {ctx}")
+                lines.append("")
+            lines.append(f"## Assistant\n{turn.answer}\n")
         path.write_text("\n".join(lines), encoding="utf-8")
         console.print(f"[green]Transcript written to {path}[/green]")
     except Exception as exc:  # pragma: no cover - filesystem failure
@@ -363,12 +359,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         ]
     )
     response_chain = prompt | llm | StrOutputParser()
-    chat_with_history = RunnableWithMessageHistory(
-        response_chain,
-        lambda _session_id: history_adapter,
-        input_messages_key="user_message",
-        history_messages_key="chat_history",
-    )
 
     console.print(
         Panel(
@@ -382,7 +372,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     transcript_log = TranscriptLog()
     show_context = args.show_context
-    session_id = "cli-session"
+    IDENTITY_PHRASES = {"who are you", "what are you", "what do you do"}
 
     while True:
         try:
@@ -396,13 +386,15 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         logger.debug("Received user message: %s", user_message)
 
-        normalized = user_message.strip().lower()
-        if any(phrase in normalized for phrase in ("who are you", "what are you", "what do you do")):
+        # Exact-match (not substring) so genuine questions like "what do you do
+        # when a Pikachu faints?" aren't hijacked by this canned identity reply.
+        normalized = user_message.strip().lower().rstrip("?!.")
+        if normalized in IDENTITY_PHRASES:
             answer = f"I’m an expert research assistant specializing in: {SPECIALIZATION_LIST}."
             history_adapter.add_messages(
                 [HumanMessage(content=user_message), AIMessage(content=answer)]
             )
-            transcript_log.add_user_context([])
+            transcript_log.add_turn(user_message, answer, [])
             console.print(Panel(answer, title="Assistant", style="green"))
             continue
 
@@ -430,7 +422,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         answer = ""
         use_rag = False
         decision = None
-        manual_history_update = False
+        llm_call_failed = False
 
         with console.status("[cyan]Thinking...[/cyan]", spinner="dots"):
             gate_decision = topic_gate(
@@ -448,7 +440,6 @@ def main(argv: Sequence[str] | None = None) -> None:
                     user_message=user_message,
                 )
                 logger.debug("Off-topic gate triggered (reason: %s).", gate_decision.reason)
-                manual_history_update = True
             else:
                 decision = decide_use_rag(
                     decider_llm=decider_llm,
@@ -473,6 +464,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                         rag_topics=RAG_TOPIC_INVENTORY,
                         k=args.retrieval_k,
                         use_namespace_filter=False,
+                        rerank_fn=rerank_results,
                     )
                     rewrite_payload = rewrite.model_dump() if hasattr(rewrite, "model_dump") else rewrite.dict()
                     logger.debug("Query rewrite produced: %s", rewrite_payload)
@@ -496,25 +488,31 @@ def main(argv: Sequence[str] | None = None) -> None:
                         decision=decision,
                     )
                     logger.debug("User payload forwarded to LLM (truncated): %s", user_payload[:500])
-                    answer = chat_with_history.invoke(
+                    # Invoked directly (not via RunnableWithMessageHistory) so the
+                    # persona/context-laden payload sent to the LLM never gets
+                    # written into chat_history as if it were what the user typed.
+                    answer = response_chain.invoke(
                         {
                             "system_prompt": args.system_prompt,
+                            "chat_history": history_adapter.messages,
                             "user_message": user_payload,
-                        },
-                        config={"configurable": {"session_id": session_id}},
+                        }
                     )
                     logger.debug("LLM output (truncated): %s", answer[:500])
                 except Exception as exc:
                     logger.exception("LLM call failed.")
                     console.print(f"[red]LLM call failed: {exc}[/red]")
-                    sys.exit(1)
+                    llm_call_failed = True
 
-        if manual_history_update:
-            history_adapter.add_messages(
-                [HumanMessage(content=user_message), AIMessage(content=answer)]
-            )
+        if llm_call_failed:
+            # Don't record a broken turn; let the user retry without losing
+            # the session (and without losing --save-transcript on exit).
+            continue
 
-        transcript_log.add_user_context(context_blocks)
+        history_adapter.add_messages(
+            [HumanMessage(content=user_message), AIMessage(content=answer)]
+        )
+        transcript_log.add_turn(user_message, answer, context_blocks)
         if use_rag and show_context:
             render_context_table(results, console)
 
