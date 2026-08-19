@@ -97,6 +97,8 @@ Content format: keep it simple — only Markdown (`.md`) files are supported for
 
 Flow: topic gate → RAG decider → (optional) rewrite → retrieve → rerank → compose → LLM → answer. The structured helpers are in `agent_orchestration_helper.py`; the topic gate lives in `utils/topic_gate.py`.
 
+Low-confidence fail-safes are intentionally asymmetric: `topic_gate` (`utils/topic_gate.py`) fails **open** (`on_topic=True`) below its confidence floor, so an uncertain classification doesn't wrongly refuse a legitimate question; `decide_use_rag` (`agent_orchestration_helper.py`) fails **closed** (`use_rag=False`), so an uncertain classification doesn't inject irrelevant retrieved context. Both defaults favor answering over refusing/injecting noise — keep this in mind before "fixing" one to match the other.
+
 Useful flags:
 
 - `scripts/05_chat_cli.py --show-context --debug`

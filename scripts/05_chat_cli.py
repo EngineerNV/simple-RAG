@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 import textwrap
 import warnings
@@ -56,6 +55,7 @@ from utils import (
     generate_rejection,
     topic_gate,
 )
+from utils.llm_provider import resolve_provider_and_key as resolve_api_key
 
 query_module = import_module("scripts.02_query")
 
@@ -158,55 +158,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--save-transcript", dest="transcript_path", help="Optional file path to write the chat transcript on exit")
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging to stderr")
     return parser.parse_args(argv)
-
-
-def auto_detect_provider() -> tuple[str, str] | None:
-    """Auto-detect provider based on which API key is set.
-    
-    Returns:
-        (provider_name, api_key) tuple or None if no key found.
-    """
-    if os.environ.get("OPENAI_API_KEY"):
-        return ("openai", os.environ["OPENAI_API_KEY"])
-    if os.environ.get("GOOGLE_API_KEY"):
-        return ("gemini", os.environ["GOOGLE_API_KEY"])
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return ("claude", os.environ["ANTHROPIC_API_KEY"])
-    return None
-
-
-def resolve_api_key(explicit: str | None, provider_hint: str | None = None) -> tuple[str, str | None]:
-    """Resolve the provider and API key from explicit args or environment.
-    
-    Args:
-        explicit: Explicit --api-key override
-        provider_hint: Explicit --provider override
-        
-    Returns:
-        (provider, api_key) tuple
-    """
-    # If both explicit values provided, use them
-    if explicit and provider_hint:
-        return (provider_hint, explicit)
-    
-    # If only explicit key, need to detect provider
-    if explicit:
-        if provider_hint:
-            return (provider_hint, explicit)
-        # Try to auto-detect from env vars as fallback
-        detected = auto_detect_provider()
-        return (detected[0], explicit) if detected else ("openai", explicit)
-    
-    # Auto-detect from environment
-    detected = auto_detect_provider()
-    if detected:
-        # If provider_hint given, respect it but use auto-detected key
-        if provider_hint:
-            return (provider_hint, detected[1])
-        return detected
-    
-    # No key found anywhere
-    return (provider_hint or "openai", None)
 
 
 def format_contexts(results) -> List[str]:
