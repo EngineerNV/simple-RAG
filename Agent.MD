@@ -48,7 +48,7 @@ Copy-Item .env.example .env
 
 Core pipeline (numbered in run order):
 
-1) `scripts/00_ingest.py` — token-aware chunking of Markdown files from `data/corpus/` (+ small H2 fallback for tiny files). Emits LangChain `Document` chunks with `chunk_index/chunk_count` and `source` metadata. Only `.md` content is supported for now.
+1) `scripts/00_ingest.py` — header-aware, two-pass chunking of Markdown files from `data/corpus/`: pass 1 splits at heading boundaries (`#`/`##`/`###`/`####`) via `MarkdownHeaderTextSplitter`, so every chunk carries its enclosing heading(s) as metadata under those same keys (e.g. `{"#": "...", "##": "...", "###": "Pikachu (...)"}`); pass 2 re-splits any section still over `INGEST_CHUNK_SIZE` tokens with the existing token-aware splitter, preserving overlap and heading metadata on the sub-chunks. Emits LangChain `Document` chunks with `chunk_index`/`chunk_count` and `source`/`source_path` metadata alongside the heading keys. Only `.md` content is supported for now.
 
 2) `scripts/01_build_index.py` — embeds chunks with MiniLM (`HuggingFaceEmbeddings`) and (re)creates `data/chroma/`. Summary prints collection, persist dir, Documents embedded, and a preview of metadata keys; also echoes ingest chunk size/overlap.
 
@@ -84,7 +84,7 @@ Scope is defined in `rag_content.json`:
 - `rag_topic_inventory` (multi-line description) guides the decider/rewriter.
 - `specialization_topics` (list) appear in the persona and refusals.
 
-Content format: keep it simple — only Markdown (`.md`) files are supported for ingestion today. The ingester uses a tiktoken-aware splitter with overlap. For very small files, it may use H2 headings to create multiple chunks (so tests and UX see more than one chunk when structure exists).
+Content format: keep it simple — only Markdown (`.md`) files are supported for ingestion today. The ingester splits at heading boundaries first (every chunk carries its `#`/`##`/`###`/`####` heading path as metadata), then re-splits any section still over `INGEST_CHUNK_SIZE` tokens with a tiktoken-aware splitter, preserving overlap. Headings therefore double as the retrieval-time section-title metadata — keep entities (a species, a gym leader, a case study) each under their own heading rather than bundled as bullets under a shared one, or their chunks won't get a distinct title.
 
 ## Reranker (where and how)
 
@@ -121,7 +121,7 @@ Useful flags:
 
 - Tests expect:
   - `01_build_index.py` to print “Documents embedded”.
-  - `00_ingest.py` to return ≥2 docs for simple H2-structured input and preserve the H1 title in metadata under `"#"`.
+  - `00_ingest.py` to return ≥2 docs for simple H2-structured input and preserve the H1 title in metadata under `"#"` (the general path now, not a small-file fallback).
   - `02_query.py` helpers to coerce/format scores and compose messages.
 
 ## Contribution checklist (for agents)
