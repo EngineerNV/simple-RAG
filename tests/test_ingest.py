@@ -28,5 +28,8 @@ def test_ingest_returns_documents(monkeypatch: pytest.MonkeyPatch, corpus_dir: P
     assert len(docs) >= 2
     headers = [doc.metadata.get("#") for doc in docs if doc.metadata.get("#")]
     assert "Title" in headers
+    # The deepest heading is re-prepended to page_content (stripped from the
+    # body by the header splitter) so entity names stay embeddable/searchable
+    # in the text itself, not just in metadata.
     contents = {doc.page_content.strip() for doc in docs}
-    assert "Welcome" in contents
+    assert any("Welcome" in c for c in contents)

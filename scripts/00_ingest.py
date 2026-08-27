@@ -84,8 +84,10 @@ _SPLITTER = _build_splitter()
 # entries nested under a thematic H3 subgroup (e.g. a species under a
 # "Rock & Ground Dwellers" grouping); most sections only go two or three
 # levels deep, which the splitter handles fine by omitting unused keys.
+_HEADING_METADATA_KEYS = ("#", "##", "###", "####")
+
 _HEADER_SPLITTER = MarkdownHeaderTextSplitter(
-    headers_to_split_on=[("#", "#"), ("##", "##"), ("###", "###"), ("####", "####")],
+    headers_to_split_on=[(k, k) for k in _HEADING_METADATA_KEYS],
     strip_headers=True,
 )
 
@@ -99,10 +101,15 @@ def split_markdown(markdown_text: str, *, source_path: str) -> List[Document]:
     """Split markdown into section-scoped, token-bounded chunks.
 
     Pass 1 (``_HEADER_SPLITTER``) splits the document at heading boundaries so
-    every chunk carries its enclosing heading(s) as metadata. Pass 2 re-runs
-    the token-aware ``_SPLITTER`` on any section that still exceeds
-    ``CHUNK_SIZE_TOKENS``, so long entries still get overlap-preserving
-    sub-chunks instead of one oversized chunk.
+    every chunk carries its enclosing heading(s) as metadata. Headers are
+    stripped from the body text, so the deepest heading (e.g. a species name)
+    is re-prepended to each resulting chunk's ``page_content`` — otherwise it
+    would only exist in metadata, invisible to both the embedder and the
+    lexical reranker (both operate on ``page_content`` alone), making the
+    entity name itself unsearchable. Pass 2 re-runs the token-aware
+    ``_SPLITTER`` on any section that still exceeds ``CHUNK_SIZE_TOKENS``, so
+    long entries still get overlap-preserving sub-chunks instead of one
+    oversized chunk.
     """
 
     base_metadata = {
@@ -116,9 +123,15 @@ def split_markdown(markdown_text: str, *, source_path: str) -> List[Document]:
     documents: List[Document] = []
     for section in sections:
         section_metadata = {**base_metadata, **section.metadata}
-        documents.extend(
-            _SPLITTER.create_documents([section.page_content.strip()], metadatas=[section_metadata])
+        heading = next(
+            (section.metadata[key] for key in reversed(_HEADING_METADATA_KEYS) if key in section.metadata),
+            None,
         )
+        sub_docs = _SPLITTER.create_documents([section.page_content.strip()], metadatas=[section_metadata])
+        for sub_doc in sub_docs:
+            if heading:
+                sub_doc.page_content = f"{heading}\n\n{sub_doc.page_content}"
+        documents.extend(sub_docs)
 
     if not documents:
         # Degenerate case (no headings, or headings with no body text at all):

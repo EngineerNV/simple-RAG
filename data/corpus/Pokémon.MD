@@ -381,11 +381,11 @@
 #### Hitmonlee & Hitmonchan
 
 * **Typing**: Fighting  
-* **Habitat**: Urban dojos and training grounds; each evolves from a single Tyrogue-stage encounter split by an unresolved evolutionary trigger.  
+* **Habitat**: Urban dojos and training grounds near Saffron; neither evolves in Kanto.  
 * **Base Stats** (Hitmonlee): HP 50 / Atk 120 / Def 53 / Sp.Atk 35 / Sp.Def 110 / Speed 87  
 * **Base Stats** (Hitmonchan): HP 50 / Atk 105 / Def 79 / Sp.Atk 35 / Sp.Def 110 / Speed 76  
-* **Moves**: High Jump Kick, Mega Kick (Hitmonlee); Comet Punch, Mach Punch (Hitmonchan).  
-* **Field Role**: Bruno's mid-order specialists, favoring extended-reach kicks and rapid-fire punches respectively.  
+* **Moves**: High Jump Kick, Mega Kick (Hitmonlee); Comet Punch, Fire Punch (Hitmonchan).  
+* **Field Role**: Bruno's mid-order specialists, favoring extended-reach kicks and rapid-fire elemental punches respectively.  
 * **Lore**: The two species are often described as sparring rivals in local dojo folklore—Hitmonlee's extending legs and Hitmonchan's punch tempo are taught side by side as complementary striking philosophies.
 
 ### Fire & Ember-types
