@@ -1,14 +1,33 @@
 """07_ragas_eval.py — score the RAG pipeline against a golden question set with RAGAS.
 
-For each (question, ground_truth, reference_contexts) triple in the golden
-set, this runs the *real* chat pipeline (topic gate -> decider -> retrieve ->
-rerank -> compose -> LLM, via ``chat_engine.ChatEngine``) to collect the
-actual answer and retrieved contexts, then scores the batch with RAGAS:
-Faithfulness, AnswerRelevancy, ContextPrecision, and ContextRecall.
+New to RAGAS or to evaluating a RAG pipeline at all? Read data/eval/README.md
+first — it explains *why* a golden set exists, walks one question through
+this whole file step by step, and defines what each of the four scores below
+actually measures. This docstring is the short version.
+
+The idea in one paragraph: a "golden set" (data/eval/golden_qa.json) is a
+list of questions where a human has already written down the correct answer
+and pointed at the exact corpus passage that supports it. This script runs
+each question through the *real* chat pipeline (topic gate -> decider ->
+retrieve -> rerank -> compose -> LLM, via chat_engine.ChatEngine -- no
+shortcuts, it's the same code path a chat user hits), then hands a second,
+independent "judge" LLM the question, the pipeline's actual answer, the
+chunks it actually retrieved, and the human-written correct answer/passage --
+and asks the judge to score four things:
+
+- Faithfulness       -- did the answer only claim things the retrieved text
+                         actually supports? (catches hallucination)
+- AnswerRelevancy     -- did the answer address the question that was asked?
+                         (catches accurate-but-off-topic answers)
+- ContextPrecision    -- was what got retrieved actually useful?
+                         (catches a noisy retriever/reranker)
+- ContextRecall       -- did retrieval find everything needed to answer
+                         correctly? (catches a retriever that missed something)
 
 Running this makes real LLM calls (one per pipeline turn, plus several judge
-calls per RAGAS metric per question) and requires an installed `ragas`
-(see requirements-eval.txt) plus an API key for whichever provider you use.
+calls per RAGAS metric per question -- a 15-question golden set is on the
+order of a hundred-plus calls) and requires an installed `ragas` (see
+requirements-eval.txt) plus an API key for whichever provider you use.
 """
 
 from __future__ import annotations
@@ -82,7 +101,20 @@ def load_golden_set(path: Path) -> List[dict]:
 
 
 def collect_samples(engine: ChatEngine, golden_items: Sequence[dict]) -> tuple[list, list[str]]:
-    """Run each golden question through the real pipeline; return (samples, warnings)."""
+    """Turn each golden question into a RAGAS ``SingleTurnSample`` by actually running it.
+
+    This is the step that makes the eval honest: ``retrieved_contexts`` and
+    ``response`` below come from *actually calling* ``engine.process_turn``,
+    not from anything precomputed. If a corpus edit or a chunking/reranking
+    change makes retrieval worse, this function is where that regression
+    first shows up (as different chunks flowing into the sample), before
+    RAGAS ever scores it.
+
+    ``reference`` (the human-written correct answer) and ``reference_contexts``
+    (the verbatim corpus passage that supports it) come straight from the
+    golden set file and never change -- see data/eval/README.md for why they
+    have to be exact quotes, not paraphrases.
+    """
 
     from ragas import SingleTurnSample
 
@@ -90,11 +122,24 @@ def collect_samples(engine: ChatEngine, golden_items: Sequence[dict]) -> tuple[l
     warnings_out: list[str] = []
     for item in golden_items:
         question = item["question"]
-        engine.reset()  # each golden question is independent, not a multi-turn conversation
+        # Each golden question is graded independently. Without this reset,
+        # ChatEngine's conversation memory would carry over between
+        # questions -- question 5 would be answered with question 4's
+        # context still influencing the RAG decider and query rewriter,
+        # which is a multi-turn *conversation* test, not what a golden set
+        # of independent questions is meant to measure.
+        engine.reset()
         turn = engine.process_turn(question)
         if not turn.ok:
+            # turn.error means the pipeline's own LLM call failed (rate
+            # limit, bad key, etc.) -- not a quality problem to score, so we
+            # skip it and keep going rather than aborting the whole run over
+            # one question.
             warnings_out.append(f"Question skipped (LLM call failed): {question!r} -> {turn.error}")
             continue
+        # RAGAS's context metrics compare against raw passage text, so we
+        # pass the plain page_content here -- not the "[source N] score=..."
+        # annotated strings chat_engine.format_contexts() builds for display.
         retrieved_contexts = [getattr(doc, "page_content", "") for doc, _ in turn.results]
         samples.append(
             SingleTurnSample(
@@ -109,6 +154,18 @@ def collect_samples(engine: ChatEngine, golden_items: Sequence[dict]) -> tuple[l
 
 
 def run_ragas(samples: list, judge_llm: Any, judge_embeddings: Any):
+    """Score the collected samples with RAGAS's four classic metrics.
+
+    ``judge_llm`` reads each sample and produces the scores; it's
+    deliberately allowed to be a different model/provider than the pipeline
+    being tested (see ``--judge-model``/``--judge-provider`` in
+    ``parse_args``) so the same model isn't grading its own homework.
+    ``judge_embeddings`` is only needed by AnswerRelevancy, which measures
+    "did the answer address the question?" by embedding a few paraphrased
+    guesses at what question the answer *would* suit, and comparing those
+    embeddings to the real question.
+    """
+
     from ragas import EvaluationDataset, evaluate
     from ragas.metrics import AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness
 
@@ -118,6 +175,15 @@ def run_ragas(samples: list, judge_llm: Any, judge_embeddings: Any):
 
 
 def print_summary(result, out_path: Path) -> None:
+    """Print an aggregate + per-question breakdown, and save the full report as JSON.
+
+    Read the per-question breakdown, not just the aggregate, before drawing
+    conclusions -- a single very-low score dragging down the average tells
+    you something different (one question the pipeline handles badly) than
+    every score being moderately low (a systemic issue). data/eval/README.md
+    has worked examples of what a low score in each metric actually implies.
+    """
+
     df = result.to_pandas()
     metric_cols = [c for c in df.columns if c not in {"user_input", "response", "retrieved_contexts", "reference", "reference_contexts"}]
 
@@ -170,6 +236,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         print("[ERROR] No samples were collected; nothing to evaluate.", file=sys.stderr)
         sys.exit(1)
 
+    # The judge defaults to the same provider/model/key as the pipeline under
+    # test (simplest thing that works for a first run), but every judge_*
+    # flag can override independently -- e.g. test a gpt-5-mini pipeline
+    # while judging with claude-haiku-4-5, so the judge isn't the same model
+    # (and same potential blind spots) as what it's grading.
     judge_provider, judge_api_key = resolve_provider_and_key(
         args.judge_api_key or args.api_key, args.judge_provider or args.provider
     )

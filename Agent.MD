@@ -85,9 +85,9 @@ Agent orchestration and utils:
 Data/config:
 
 - `rag_content.json` — JSON controlling the agent’s scope (topics/inventory).
-- `data/corpus/` — place `.md` files here (hidden files ignored).
+- `data/corpus/` — place `.md` files here (hidden files ignored). See the worked heading/metadata example just below before adding content.
 - `data/chroma/` — auto-created vector index storage.
-- `data/eval/golden_qa.json` — golden question/ground-truth-answer/reference-context set for `07_ragas_eval.py`.
+- `data/eval/` — `golden_qa.json` (golden question/ground-truth-answer/reference-context set) plus a `README.md` walking through the schema and what each RAGAS metric measures. See "RAGAS evaluation" below.
 
 ## Topic scope and content policy
 
@@ -97,6 +97,36 @@ Scope is defined in `rag_content.json`:
 - `specialization_topics` (list) appear in the persona and refusals.
 
 Content format: keep it simple — only Markdown (`.md`) files are supported for ingestion today. The ingester splits at heading boundaries first (every chunk carries its `#`/`##`/`###`/`####` heading path as metadata), then re-splits any section still over `INGEST_CHUNK_SIZE` tokens with a tiktoken-aware splitter, preserving overlap. Headings therefore double as the retrieval-time section-title metadata — keep entities (a species, a gym leader, a case study) each under their own heading rather than bundled as bullets under a shared one, or their chunks won't get a distinct title.
+
+**Worked example, so this isn't abstract.** Given this markdown:
+
+```markdown
+## 4. Expanded Species Research
+
+### Poison & Toxin Specialists
+
+#### Grimer → Muk
+
+* **Typing**: Poison
+* **Base Stats** (Muk): HP 105 / Atk 105 / ...
+```
+
+`00_ingest.py` (via `MarkdownHeaderTextSplitter`, `strip_headers=True`) turns the `Grimer → Muk` section into one chunk whose `page_content` is the bullet list *with the heading re-prepended* (see the "why re-prepend" note in `00_ingest.py::split_markdown`'s docstring) and whose metadata is:
+
+```python
+{"##": "4. Expanded Species Research", "###": "Poison & Toxin Specialists", "####": "Grimer → Muk", ...}
+```
+
+Now contrast a *bad* structure for the same content — bundling several species as bullets under one heading with no per-entity heading of their own:
+
+```markdown
+### Poison Types
+
+* **Grimer → Muk**: Typing: Poison. Base Stats...
+* **Koffing → Weezing**: Typing: Poison. Base Stats...
+```
+
+This produces **one chunk covering both species**, tagged only `{"###": "Poison Types"}` — a retrieval hit for "Muk" surfaces a chunk that's half about Weezing too, and there's no metadata distinguishing which species is which. This is exactly the bug a Codex review caught in this repo (PR #25): converting the bullet-per-entity sections to heading-per-entity fixed both the missing metadata *and*, once headings are stripped from `page_content`, a follow-up bug where the entity's own name disappeared from the embeddable/searchable text entirely (fixed by re-prepending the heading — see the docstring). **The rule for new corpus content: one heading per thing you want to be independently retrievable and citable.**
 
 ## Reranker (where and how)
 

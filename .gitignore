@@ -44,3 +44,9 @@ data/corpus/*
 !data/corpus/Pokémon.MD
 data/chroma/*
 !data/chroma/.gitkeep
+
+# Generated per-run output from scripts/07_ragas_eval.py -- a snapshot of one
+# run, not a fixture. The golden question set itself (data/eval/golden_qa.json)
+# and any docs under data/eval/ are still tracked normally.
+data/eval/ragas_report.json
+data/eval/*.report.json
