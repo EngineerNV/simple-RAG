@@ -144,8 +144,79 @@ def retrieve_contexts(store: Chroma, question: str, k: int) -> RetrieverResult:
     return formatted
 
 
-def rerank_results(results: RetrieverResult, question: str, alpha: float = 0.5) -> RetrieverResult:
-    """Lightweight reranker combining retriever scores with lexical overlap.
+CROSS_ENCODER_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_cross_encoder = None
+_cross_encoder_load_failed = False
+
+
+def _load_cross_encoder():
+    """Lazily load and cache the cross-encoder reranker model.
+
+    Returns ``None`` (without retrying) if it can't be loaded -- missing
+    optional dependency, offline environment, etc. -- so callers can fall
+    back to the lexical reranker gracefully.
+    """
+    global _cross_encoder, _cross_encoder_load_failed
+    if _cross_encoder is not None or _cross_encoder_load_failed:
+        return _cross_encoder
+    try:
+        from sentence_transformers import CrossEncoder
+
+        _cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL_NAME)
+    except Exception:
+        _cross_encoder_load_failed = True
+        return None
+    return _cross_encoder
+
+
+def _sigmoid(x: float) -> float:
+    import math
+
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _rerank_cross_encoder(results: RetrieverResult, question: str) -> RetrieverResult | None:
+    """Rerank with a cross-encoder model; returns ``None`` if unavailable.
+
+    Cross-encoders score a (query, document) pair jointly, which captures
+    semantic relevance the lexical blend below can't (synonyms, paraphrase,
+    word order) at the cost of one forward pass per candidate -- fine at the
+    small k this project retrieves with.
+    """
+    if not results:
+        return None
+    model = _load_cross_encoder()
+    if model is None:
+        return None
+    pairs = [(question, getattr(doc, "page_content", "") or "") for doc, _ in results]
+    try:
+        raw_scores = model.predict(pairs)
+    except Exception:
+        return None
+
+    reranked: list[tuple[tuple[Document, float | None], float]] = []
+    for (doc, score), raw_score in zip(results, raw_scores):
+        combined = _sigmoid(float(raw_score))
+        try:
+            md = getattr(doc, "metadata", {}) or {}
+            md["combined_score"] = round(combined, 4)
+            md["cross_encoder_score"] = round(combined, 4)
+            doc.metadata = md
+        except Exception:
+            pass
+        reranked.append(((doc, score), combined))
+
+    reranked.sort(key=lambda item: item[1], reverse=True)
+    return [item[0] for item in reranked]
+
+
+def rerank_results(
+    results: RetrieverResult,
+    question: str,
+    alpha: float = 0.5,
+    use_cross_encoder: bool = True,
+) -> RetrieverResult:
+    """Rerank retrieved results, preferring a local cross-encoder model.
 
     Parameters
     ----------
@@ -153,16 +224,28 @@ def rerank_results(results: RetrieverResult, question: str, alpha: float = 0.5) 
         List of (Document, score) tuples returned by the retriever. Scores may
         be None if the retriever did not provide numeric values.
     question:
-        The original user query used to compute lexical overlap.
+        The original user query.
     alpha:
-        Weight for the original retriever score in final ranking (0..1). The
-        lexical overlap weight is (1-alpha).
+        Weight for the original retriever score (0..1) in the lexical-blend
+        fallback below; unused when the cross-encoder path succeeds.
+    use_cross_encoder:
+        Try the cross-encoder model first (default). Set to False to force
+        the lexical blend -- e.g. in tests, to avoid depending on a
+        downloaded ML model -- or in offline environments where the model
+        can't be fetched (loading already fails gracefully either way).
 
     Returns
     -------
     RetrieverResult
         Results sorted by the combined score (descending).
     """
+    if use_cross_encoder:
+        ce_result = _rerank_cross_encoder(results, question)
+        if ce_result is not None:
+            return ce_result
+        # Cross-encoder unavailable (dependency missing, offline, or a
+        # load/predict failure) -- fall through to the lexical blend.
+
     import re
 
     # Extract numeric retriever scores and compute normalization bounds.

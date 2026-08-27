@@ -1,0 +1,28 @@
+# Optional extra for scripts/07_ragas_eval.py -- install alongside
+# requirements.txt: pip install -r requirements.txt -r requirements-eval.txt
+#
+# ragas's own dependency metadata is loose enough to resolve to package
+# versions that break either ragas itself or this project's pinned langchain
+# stack (see requirements.txt's note) if installed unpinned. Every version
+# below is verified working together, on top of requirements.txt's pins, in
+# the same test run. Bump as a matched set and re-run
+# `python -m pytest -q` plus a real `07_ragas_eval.py` invocation after.
+ragas==0.4.3
+
+# ragas's own transitive dependencies, pinned to versions that don't drag in
+# an incompatible openai/langchain-core (openai in particular: ragas's
+# instructor dependency wants openai>=2.0 by default, which breaks
+# langchain-openai==0.1.25's own <2.0 requirement from requirements.txt).
+appdirs==1.4.4
+datasets==5.0.1
+diskcache==5.6.3
+instructor==1.15.4
+nest-asyncio==1.6.0
+networkx==3.6.1
+numpy==1.26.4
+openai==1.109.1
+pillow==12.3.0
+scikit-network==0.33.5
+tiktoken==0.14.0
+tqdm==4.70.0
+typer==0.27.1

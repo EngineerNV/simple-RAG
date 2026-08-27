@@ -12,11 +12,16 @@ pip install -r requirements-min.txt    # or requirements.txt for full stack
 # Optional: test tooling
 pip install -r requirements-dev.txt    # provides pytest
 
+# Optional: RAGAS evaluation (scripts/07_ragas_eval.py)
+pip install -r requirements-eval.txt
+
 # Build and smoke-test
 python scripts/00_ingest.py
 python scripts/01_build_index.py
 python scripts/02_query.py -q "What is the pipeline?" --agent-mode pretend
 ```
+
+**The `langchain` family in `requirements.txt` is pinned, not loose.** `chat_engine.py` uses the legacy `langchain.memory.ConversationSummaryBufferMemory`, which was removed in `langchain>=1.0` — an unpinned install silently resolves to a version that breaks the chat CLI/TUI at import time. Bump the pinned set together (see the comment above it in `requirements.txt`), never one package at a time, and re-run `python -m pytest -q` plus a real chat session after.
 
 Environment variables:
 
@@ -60,11 +65,17 @@ Core pipeline (numbered in run order):
 
 6) `scripts/04_llm_api.py` — prompt assembly and LLM smoke test with usage display.
 
-7) `scripts/05_chat_cli.py` — interactive chat agent: topic gate → RAG decider → optional rewrite → retrieve → rerank → compose → answer. Shows contexts when `--show-context`.
+7) `scripts/05_chat_cli.py` — Rich-based terminal chat REPL. Thin rendering layer over `chat_engine.ChatEngine`; shows contexts when `--show-context`.
+
+8) `scripts/06_chat_tui.py` — full-screen Textual TUI for the same chat pipeline: scrollable chat log, input box, and a live context sidebar (also built on `chat_engine.ChatEngine`, no pipeline logic duplicated). `ctrl+r` resets, `ctrl+s` saves the transcript, `/exit` quits.
+
+9) `scripts/07_ragas_eval.py` — scores the pipeline against `data/eval/golden_qa.json` with [RAGAS](https://github.com/explodinggremlins/ragas) (Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall). Requires `requirements-eval.txt` and an API key for whichever provider is set as the judge (`--judge-provider`/`--judge-model`, defaults to the same provider/model as the pipeline under test). See "RAGAS evaluation" below.
 
 Agent orchestration and utils:
 
+- `chat_engine.py` — UI-agnostic core of the chat pipeline (`ChatEngine`, `ChatEngineConfig`, `TurnResult`, `TranscriptLog`): topic gate → RAG decider → optional rewrite → retrieve → rerank → compose → LLM → history/transcript commit. Shared by `05_chat_cli.py`, `06_chat_tui.py`, and `07_ragas_eval.py` — implement pipeline changes here once, not per-UI.
 - `agent_orchestration_helper.py` — loads topic inventory from `rag_content.json`; builds structured decider/rewriter; assembles user payloads (with persona) for the LLM.
+- `utils/llm_provider.py` — shared provider auto-detection (`resolve_provider_and_key`) and chat-client construction (`build_chat_model`) for openai/gemini/claude, used by every script that talks to an LLM.
 - `utils/inventory_view.py` — formats specialization topics.
 - `utils/persona.py` — persona preamble builder.
 - `utils/rejections.py` — structured off-topic refusals.
@@ -76,6 +87,7 @@ Data/config:
 - `rag_content.json` — JSON controlling the agent’s scope (topics/inventory).
 - `data/corpus/` — place `.md` files here (hidden files ignored).
 - `data/chroma/` — auto-created vector index storage.
+- `data/eval/golden_qa.json` — golden question/ground-truth-answer/reference-context set for `07_ragas_eval.py`.
 
 ## Topic scope and content policy
 
@@ -88,21 +100,31 @@ Content format: keep it simple — only Markdown (`.md`) files are supported for
 
 ## Reranker (where and how)
 
-- Location: `scripts/02_query.py` → `rerank_results(results, question, alpha=0.5)`.
-- Method: min–max normalize the retriever score; compute lexical-overlap with regex tokenization; blend by `combined = alpha * retriever_norm + (1-alpha) * lexical`. The reranker writes `combined_score`, `lexical_overlap`, `retriever_norm` to `doc.metadata` and reorders results; it does not overwrite the original retriever score.
-- Displays: `emit_contexts`, `compose_user_prompt`, and the chat CLI’s tables show `score` and `rerank` when present.
-- Robustness: failure is non-fatal; the script falls back to the original ordering.
+- Location: `scripts/02_query.py` → `rerank_results(results, question, alpha=0.5, use_cross_encoder=True)`.
+- Default method: a local cross-encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`, via `sentence-transformers`, lazily loaded once at module level) scores each `(question, doc)` pair jointly and writes a sigmoid-normalized `combined_score`/`cross_encoder_score` to `doc.metadata`. Catches semantic relevance (synonyms, paraphrase, word order) the lexical blend can't.
+- Fallback method: if the cross-encoder can't load (missing dependency, offline environment) or `use_cross_encoder=False` is passed, falls back to the original lightweight lexical blend — min–max normalize the retriever score, compute lexical overlap via regex tokenization, blend by `combined = alpha * retriever_norm + (1-alpha) * lexical`. Tests force this path (`use_cross_encoder=False`) to avoid depending on a downloaded ML model.
+- Displays: `emit_contexts`, `compose_user_prompt`, and the chat CLI/TUI's context views show `score` and `rerank` when present.
+- Robustness: failure at any stage is non-fatal; the script falls back to the original retriever ordering.
 
-## CLI agent loop (chat)
+## Chat pipeline (topic gate → decider → retrieve → rerank → compose → LLM)
 
-Flow: topic gate → RAG decider → (optional) rewrite → retrieve → rerank → compose → LLM → answer. The structured helpers are in `agent_orchestration_helper.py`; the topic gate lives in `utils/topic_gate.py`.
+Flow: topic gate → RAG decider → (optional) rewrite → retrieve → rerank → compose → LLM → answer, implemented once in `chat_engine.ChatEngine.process_turn` and shared by every chat surface (`05_chat_cli.py`, `06_chat_tui.py`, `07_ragas_eval.py`). The structured helpers are in `agent_orchestration_helper.py`; the topic gate lives in `utils/topic_gate.py`. Implement pipeline changes in `chat_engine.py`, not in a UI file — a UI file should only ever construct a `ChatEngine`, call `process_turn`/`reset`/`save_transcript`, and render the returned `TurnResult`.
 
 Low-confidence fail-safes are intentionally asymmetric: `topic_gate` (`utils/topic_gate.py`) fails **open** (`on_topic=True`) below its confidence floor, so an uncertain classification doesn't wrongly refuse a legitimate question; `decide_use_rag` (`agent_orchestration_helper.py`) fails **closed** (`use_rag=False`), so an uncertain classification doesn't inject irrelevant retrieved context. Both defaults favor answering over refusing/injecting noise — keep this in mind before "fixing" one to match the other.
 
 Useful flags:
 
 - `scripts/05_chat_cli.py --show-context --debug`
+- `scripts/06_chat_tui.py --save-transcript out.md`
 - `scripts/02_query.py -q "..." --agent-mode pretend|llm --k 5`
+
+## RAGAS evaluation
+
+- `scripts/07_ragas_eval.py` runs every question in `data/eval/golden_qa.json` (schema: `question`, `ground_truth`, `reference_contexts`) through the *real* pipeline via a single reused `ChatEngine` (calling `engine.reset()` before each question so questions stay independent, not a multi-turn conversation), then scores the batch with RAGAS's Faithfulness, AnswerRelevancy, ContextPrecision, and ContextRecall.
+- The judge model is independently configurable (`--judge-provider`/`--judge-model`/`--judge-api-key`), defaulting to whatever provider/model the pipeline under test uses. A cheap, fast, instruction-following model is recommended for the judge (e.g. `claude-haiku-4-5`) since RAGAS issues several judge calls per metric per question — a 15-question run is on the order of a hundred+ judge calls.
+- Requires `requirements-eval.txt` (adds `ragas` and its transitive deps, pinned — see the comment at the top of that file for why unpinned installs break either `ragas` or the base `langchain` pins).
+- Output: an aggregate + per-question console summary, plus a full JSON report (`--out`, default `data/eval/ragas_report.json`).
+- Extending the golden set: keep `reference_contexts` as verbatim excerpts actually present in the corpus — RAGAS's context metrics score against them directly, so a paraphrased or stale reference silently under/over-states retrieval quality.
 
 ## Logging and warnings
 
