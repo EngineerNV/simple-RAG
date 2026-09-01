@@ -1,0 +1,11 @@
+# Everything in one shot: the full runtime stack, RAGAS evaluation support,
+# and test tooling. Use this if you don't want to think about which of the
+# other requirements-*.txt files you need -- `pip install -r
+# requirements-full.txt` pulls in requirements.txt + requirements-eval.txt +
+# requirements-dev.txt, in the order that keeps their pins compatible.
+#
+# If you only need the base pipeline (no RAGAS, no pytest), install
+# requirements.txt directly instead -- it's smaller and installs faster.
+-r requirements.txt
+-r requirements-eval.txt
+-r requirements-dev.txt

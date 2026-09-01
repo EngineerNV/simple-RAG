@@ -10,7 +10,6 @@ your index before integrating richer agents.
 from __future__ import annotations
 
 import argparse
-import os
 # Optional dependency; fall back to a no-op when not installed.
 try:
     from dotenv import load_dotenv
@@ -24,10 +23,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Sequence, Tuple
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+
+from utils.llm_provider import (
+    MissingProviderDependencyError,
+    UnsupportedProviderError,
+    auto_detect_provider,
+    build_chat_model as load_chat_model,
+    resolve_provider_and_key,
+)
 
 # Suppress noisy deprecation warnings without changing packages.
 try:  # Best-effort: some environments provide this warning class
@@ -72,14 +83,6 @@ class MissingAPIKeyError(RuntimeError):
 
 class LLMInvocationError(RuntimeError):
     """Raised when the underlying LLM client fails to produce a response."""
-
-
-class UnsupportedProviderError(RuntimeError):
-    """Raised when an unknown LLM provider identifier is supplied."""
-
-
-class MissingProviderDependencyError(RuntimeError):
-    """Raised when a provider-specific dependency is unavailable."""
 
 
 @dataclass
@@ -141,8 +144,79 @@ def retrieve_contexts(store: Chroma, question: str, k: int) -> RetrieverResult:
     return formatted
 
 
-def rerank_results(results: RetrieverResult, question: str, alpha: float = 0.5) -> RetrieverResult:
-    """Lightweight reranker combining retriever scores with lexical overlap.
+CROSS_ENCODER_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_cross_encoder = None
+_cross_encoder_load_failed = False
+
+
+def _load_cross_encoder():
+    """Lazily load and cache the cross-encoder reranker model.
+
+    Returns ``None`` (without retrying) if it can't be loaded -- missing
+    optional dependency, offline environment, etc. -- so callers can fall
+    back to the lexical reranker gracefully.
+    """
+    global _cross_encoder, _cross_encoder_load_failed
+    if _cross_encoder is not None or _cross_encoder_load_failed:
+        return _cross_encoder
+    try:
+        from sentence_transformers import CrossEncoder
+
+        _cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL_NAME)
+    except Exception:
+        _cross_encoder_load_failed = True
+        return None
+    return _cross_encoder
+
+
+def _sigmoid(x: float) -> float:
+    import math
+
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _rerank_cross_encoder(results: RetrieverResult, question: str) -> RetrieverResult | None:
+    """Rerank with a cross-encoder model; returns ``None`` if unavailable.
+
+    Cross-encoders score a (query, document) pair jointly, which captures
+    semantic relevance the lexical blend below can't (synonyms, paraphrase,
+    word order) at the cost of one forward pass per candidate -- fine at the
+    small k this project retrieves with.
+    """
+    if not results:
+        return None
+    model = _load_cross_encoder()
+    if model is None:
+        return None
+    pairs = [(question, getattr(doc, "page_content", "") or "") for doc, _ in results]
+    try:
+        raw_scores = model.predict(pairs)
+    except Exception:
+        return None
+
+    reranked: list[tuple[tuple[Document, float | None], float]] = []
+    for (doc, score), raw_score in zip(results, raw_scores):
+        combined = _sigmoid(float(raw_score))
+        try:
+            md = getattr(doc, "metadata", {}) or {}
+            md["combined_score"] = round(combined, 4)
+            md["cross_encoder_score"] = round(combined, 4)
+            doc.metadata = md
+        except Exception:
+            pass
+        reranked.append(((doc, score), combined))
+
+    reranked.sort(key=lambda item: item[1], reverse=True)
+    return [item[0] for item in reranked]
+
+
+def rerank_results(
+    results: RetrieverResult,
+    question: str,
+    alpha: float = 0.5,
+    use_cross_encoder: bool = True,
+) -> RetrieverResult:
+    """Rerank retrieved results, preferring a local cross-encoder model.
 
     Parameters
     ----------
@@ -150,16 +224,28 @@ def rerank_results(results: RetrieverResult, question: str, alpha: float = 0.5) 
         List of (Document, score) tuples returned by the retriever. Scores may
         be None if the retriever did not provide numeric values.
     question:
-        The original user query used to compute lexical overlap.
+        The original user query.
     alpha:
-        Weight for the original retriever score in final ranking (0..1). The
-        lexical overlap weight is (1-alpha).
+        Weight for the original retriever score (0..1) in the lexical-blend
+        fallback below; unused when the cross-encoder path succeeds.
+    use_cross_encoder:
+        Try the cross-encoder model first (default). Set to False to force
+        the lexical blend -- e.g. in tests, to avoid depending on a
+        downloaded ML model -- or in offline environments where the model
+        can't be fetched (loading already fails gracefully either way).
 
     Returns
     -------
     RetrieverResult
         Results sorted by the combined score (descending).
     """
+    if use_cross_encoder:
+        ce_result = _rerank_cross_encoder(results, question)
+        if ce_result is not None:
+            return ce_result
+        # Cross-encoder unavailable (dependency missing, offline, or a
+        # load/predict failure) -- fall through to the lexical blend.
+
     import re
 
     # Extract numeric retriever scores and compute normalization bounds.
@@ -320,69 +406,6 @@ def compose_messages(
     ]
 
 
-def load_chat_model(
-    provider: str,
-    model_name: str,
-    api_key: str,
-    temperature: float,
-    max_tokens: int,
-    base_url: str | None,
-):
-    provider = provider.lower()
-    
-    if provider == "openai":
-        try:
-            from langchain_openai import ChatOpenAI
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise MissingProviderDependencyError(
-                "Missing optional dependency 'langchain-openai'. Install it with `pip install langchain-openai`."
-            ) from exc
-        init_kwargs = {
-            "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "openai_api_key": api_key,
-        }
-        if base_url:
-            init_kwargs["openai_api_base"] = base_url
-        return ChatOpenAI(**init_kwargs)
-    
-    elif provider == "gemini":
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise MissingProviderDependencyError(
-                "Missing optional dependency 'langchain-google-genai'. Install it with `pip install langchain-google-genai`."
-            ) from exc
-        init_kwargs = {
-            "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "google_api_key": api_key,
-        }
-        return ChatGoogleGenerativeAI(**init_kwargs)
-    
-    elif provider == "claude" or provider == "anthropic":
-        try:
-            from langchain_anthropic import ChatAnthropic
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise MissingProviderDependencyError(
-                "Missing optional dependency 'langchain-anthropic'. Install it with `pip install langchain-anthropic`."
-            ) from exc
-        init_kwargs = {
-            "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "anthropic_api_key": api_key,
-        }
-        return ChatAnthropic(**init_kwargs)
-    
-    else:
-        raise UnsupportedProviderError(
-            f"Unsupported provider '{provider}'. Supported: openai, gemini, claude (anthropic)."
-        )
-
-
 def extract_text_from_response(response) -> str:
     """Normalize the message content into a plain string for downstream use."""
 
@@ -443,55 +466,6 @@ def print_usage_metadata(usage: dict | None, show_usage: bool) -> None:
             print(f"- {key}: {value}")
     else:
         print(usage)
-
-
-def auto_detect_provider() -> tuple[str, str] | None:
-    """Auto-detect provider based on which API key is set.
-    
-    Returns:
-        (provider_name, api_key) tuple or None if no key found.
-    """
-    if os.environ.get("OPENAI_API_KEY"):
-        return ("openai", os.environ["OPENAI_API_KEY"])
-    if os.environ.get("GOOGLE_API_KEY"):
-        return ("gemini", os.environ["GOOGLE_API_KEY"])
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return ("claude", os.environ["ANTHROPIC_API_KEY"])
-    return None
-
-
-def resolve_provider_and_key(explicit_key: str | None, provider_hint: str | None) -> tuple[str, str | None]:
-    """Resolve the provider and API key from explicit args or environment.
-    
-    Args:
-        explicit_key: Explicit --api-key override
-        provider_hint: Explicit --provider override
-        
-    Returns:
-        (provider, api_key) tuple
-    """
-    # If both explicit values provided, use them
-    if explicit_key and provider_hint:
-        return (provider_hint, explicit_key)
-    
-    # If only explicit key, need to detect provider
-    if explicit_key:
-        if provider_hint:
-            return (provider_hint, explicit_key)
-        # Try to auto-detect from env vars as fallback
-        detected = auto_detect_provider()
-        return (detected[0], explicit_key) if detected else ("openai", explicit_key)
-    
-    # Auto-detect from environment
-    detected = auto_detect_provider()
-    if detected:
-        # If provider_hint given, respect it but use auto-detected key
-        if provider_hint:
-            return (provider_hint, detected[1])
-        return detected
-    
-    # No key found anywhere
-    return (provider_hint or "openai", None)
 
 
 def print_mock_answer(results: RetrieverResult) -> None:

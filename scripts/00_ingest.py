@@ -1,18 +1,18 @@
 """00_ingest.py — baseline ingestion utility for the RAG homework.
 
 This module reads markdown files from the ``data/corpus`` directory, splits them
-into smaller chunks using a token-aware text splitter, and returns a list of
-LangChain Document objects. Each Document contains the chunked text as well as metadata
-about its source file and position within that file.
+into section-scoped, token-bounded chunks, and returns a list of LangChain Document
+objects. Each Document contains the chunked text plus metadata about its source
+file, its position within that file, and the heading(s) it was found under.
 """
 
-import os  # Handle filesystem navigation for the corpus directory
-import warnings
-from typing import Iterable, List  # Describe the list of LangChain Document objects returned
-
-from langchain_core.documents import Document  # Represent individual text chunks with metadata
+import os
 import re
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+import warnings
+from typing import Iterable, List
+
+from langchain_core.documents import Document
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
 # Suppress noisy deprecation warnings without changing packages.
 try:  # Best-effort: some environments provide this warning class
@@ -78,82 +78,67 @@ def _build_splitter() -> RecursiveCharacterTextSplitter:
 
 _SPLITTER = _build_splitter()
 
+# Pass 1: split at heading boundaries. Metadata keys intentionally mirror the
+# raw heading markers ("#" through "####") so a chunk's section title is
+# visible directly in doc.metadata alongside source/chunk_index. H4 covers
+# entries nested under a thematic H3 subgroup (e.g. a species under a
+# "Rock & Ground Dwellers" grouping); most sections only go two or three
+# levels deep, which the splitter handles fine by omitting unused keys.
+_HEADING_METADATA_KEYS = ("#", "##", "###", "####")
 
-def _extract_titles(markdown_text: str) -> tuple[str | None, list[tuple[str | None, str]]]:
-    """Extract the H1 title and H2-based content sections (fallback splitter).
+_HEADER_SPLITTER = MarkdownHeaderTextSplitter(
+    headers_to_split_on=[(k, k) for k in _HEADING_METADATA_KEYS],
+    strip_headers=True,
+)
 
-    Returns (h1_title, sections) where sections is a list of (h2_title, content)
-    pairs. The preface before the first H2 appears as (None, content) if non-empty.
-    Heading lines themselves are not included in section content.
-    """
-    lines = markdown_text.splitlines()
-    h1 = None
-    # Find first H1
-    for ln in lines:
-        m = re.match(r"^#\s+(.+)$", ln.strip())
-        if m:
-            h1 = m.group(1).strip()
-            break
-
-    # Build sections split by H2 headings
-    sections: list[tuple[str | None, str]] = []
-    current_title: str | None = None
-    current_lines: list[str] = []
-    def _flush():
-        content = "\n".join([cl for cl in current_lines if cl.strip() and not cl.lstrip().startswith('#')]).strip()
-        if content:
-            sections.append((current_title, content))
-
-    for ln in lines:
-        m2 = re.match(r"^##\s+(.+)$", ln.strip())
-        if m2:
-            # flush previous
-            _flush()
-            current_title = m2.group(1).strip()
-            current_lines = []
-        else:
-            current_lines.append(ln)
-    _flush()
-    return h1, sections
+# Horizontal rules ("---", "***", "___") are pure visual separators in our
+# corpus files; strip them before header-splitting so they don't bleed into
+# a section's content or form their own near-empty chunk.
+_HORIZONTAL_RULE_RE = re.compile(r"^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$", re.MULTILINE)
 
 
 def split_markdown(markdown_text: str, *, source_path: str) -> List[Document]:
-    """Split text into token-bounded chunks while retaining document metadata."""
+    """Split markdown into section-scoped, token-bounded chunks.
+
+    Pass 1 (``_HEADER_SPLITTER``) splits the document at heading boundaries so
+    every chunk carries its enclosing heading(s) as metadata. Headers are
+    stripped from the body text, so the deepest heading (e.g. a species name)
+    is re-prepended to each resulting chunk's ``page_content`` — otherwise it
+    would only exist in metadata, invisible to both the embedder and the
+    lexical reranker (both operate on ``page_content`` alone), making the
+    entity name itself unsearchable. Pass 2 re-runs the token-aware
+    ``_SPLITTER`` on any section that still exceeds ``CHUNK_SIZE_TOKENS``, so
+    long entries still get overlap-preserving sub-chunks instead of one
+    oversized chunk.
+    """
 
     base_metadata = {
         "source": os.path.basename(source_path),
         "source_path": source_path,
     }
-    documents = _SPLITTER.create_documents(
-        [markdown_text],
-        metadatas=[base_metadata],
-    )
 
-    # If the splitter yielded only one chunk for a multi-section file,
-    # create a minimal fallback split using H2 headings so tests see >=2 docs.
-    if len(documents) == 1:
-        h1, sections = _extract_titles(markdown_text)
-        # Attach H1 title into base metadata if present
-        if h1:
-            base_metadata["#"] = h1
-        # If we found multiple non-empty sections, rebuild the documents list
-        non_empty_sections = [(t, c) for (t, c) in sections if c]
-        if len(non_empty_sections) >= 2:
-            documents = []
-            for (h2, content) in non_empty_sections:
-                md = dict(base_metadata)
-                if h2:
-                    md["##"] = h2
-                documents.append(Document(page_content=content, metadata=md))
-        else:
-            # Even for single-chunk case, preserve H1 in metadata for tests
-            if h1:
-                try:
-                    md0 = getattr(documents[0], "metadata", {}) or {}
-                    md0["#"] = h1
-                    documents[0].metadata = md0
-                except Exception:
-                    pass
+    cleaned_text = _HORIZONTAL_RULE_RE.sub("", markdown_text)
+    sections = [s for s in _HEADER_SPLITTER.split_text(cleaned_text) if s.page_content.strip()]
+
+    documents: List[Document] = []
+    for section in sections:
+        section_metadata = {**base_metadata, **section.metadata}
+        heading = next(
+            (section.metadata[key] for key in reversed(_HEADING_METADATA_KEYS) if key in section.metadata),
+            None,
+        )
+        sub_docs = _SPLITTER.create_documents([section.page_content.strip()], metadatas=[section_metadata])
+        for sub_doc in sub_docs:
+            if heading:
+                sub_doc.page_content = f"{heading}\n\n{sub_doc.page_content}"
+        documents.extend(sub_docs)
+
+    if not documents:
+        # Degenerate case (no headings, or headings with no body text at all):
+        # fall back to splitting the raw text so a file is never silently dropped.
+        stripped = cleaned_text.strip()
+        if stripped:
+            documents = _SPLITTER.create_documents([stripped], metadatas=[base_metadata])
 
     total_chunks = len(documents)
     for idx, doc in enumerate(documents):
@@ -183,9 +168,8 @@ def ingest() -> List:
     docs_all = []
     for p in files:
         docs = list(process_file(p))
-        # Clarify that we produce token-bounded chunks (not original file sections).
         print(
-            f"{os.path.basename(p)} -> {len(docs)} chunks (token-bounded, chunk_size={CHUNK_SIZE_TOKENS}, overlap={CHUNK_OVERLAP_TOKENS})"
+            f"{os.path.basename(p)} -> {len(docs)} chunks (section-scoped, max chunk_size={CHUNK_SIZE_TOKENS} tokens, overlap={CHUNK_OVERLAP_TOKENS})"
         )
         docs_all.extend(docs)
     print(f"Total chunks: {len(docs_all)}")

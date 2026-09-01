@@ -1,12 +1,20 @@
 # Orchestration & env
-langchain
-langchain-core
-langchain-community
-langchain-text-splitters
+#
+# The langchain family below is pinned, not loose. 05_chat_cli.py uses the
+# legacy langchain.memory.ConversationSummaryBufferMemory API, which was
+# removed in langchain>=1.0 -- an unpinned install silently resolves to a
+# version that breaks the chat CLI at import time. This exact set (~mid-2024
+# vintage) is verified to import and pass the test suite together; bump them
+# as a matched set, not individually, and re-run the chat CLI + tests after.
+langchain==0.2.16
+langchain-core==0.2.43
+langchain-community==0.2.16
+langchain-text-splitters==0.2.4
 chromadb==0.6.3
 python-dotenv
 pydantic
 rich
+textual
 
 # Document loaders / parsing
 pypdf
@@ -18,13 +26,13 @@ transformers
 sentence-transformers
 
 # Cloud LLMs (choose one or more)
-langchain-openai
+langchain-openai==0.1.25
 openai
 
 # Optional: Google Gemini support
 # Uncomment to use Gemini models (gemini-pro, gemini-1.5-pro, gemini-1.5-flash, etc.)
-langchain-google-genai
+langchain-google-genai==1.0.10
 
 # Optional: Anthropic Claude support
 # Uncomment to use Claude models (claude-3-opus, claude-3-5-sonnet, claude-3-haiku, etc.)
-langchain-anthropic
+langchain-anthropic==0.1.23

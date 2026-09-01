@@ -1,0 +1,107 @@
+[
+  {
+    "question": "What are Pikachu's base stats and signature moves?",
+    "ground_truth": "Pikachu's base stats are HP 35, Attack 55, Defense 30, Special Attack 50, Special Defense 40, and Speed 90. Its signature moves are Thunderbolt, Agility, Quick Attack, and Thunder.",
+    "reference_contexts": [
+      "**Typing**: Electric  \n* **Habitat**: Rare nests in Viridian Forest; bonds closely with humans.  \n* **Base Stats**: HP 35 / Atk 55 / Def 30 / Sp.Atk 50 / Sp.Def 40 / Speed 90  \n* **Signature Moves**: Thunderbolt, Agility, Quick Attack, Thunder."
+    ]
+  },
+  {
+    "question": "How does Pikachu evolve into Raichu?",
+    "ground_truth": "Pikachu evolves into Raichu using a Thunder Stone.",
+    "reference_contexts": [
+      "**Evolution**: Thunder Stone → Raichu."
+    ]
+  },
+  {
+    "question": "What Pokémon does Gym Leader Brock use, and what type is his gym?",
+    "ground_truth": "Brock is the Rock-type Gym Leader of Pewter, and he uses Geodude and Onix.",
+    "reference_contexts": [
+      "### Brock (Pewter, Rock)\n\n* Pokémon: Geodude, Onix.  \n* Lore: Advocates patience and defense; his training emphasizes endurance and rock-hard composure."
+    ]
+  },
+  {
+    "question": "What type is Alakazam, and what are its base stats?",
+    "ground_truth": "Alakazam is a pure Psychic type with base stats HP 55, Attack 50, Defense 45, Special Attack 135, Special Defense 95, and Speed 120.",
+    "reference_contexts": [
+      "**Typing**: Psychic  \n* **Habitat**: Rarely seen active in the wild; Abra reportedly teleports away from most encounters.  \n* **Base Stats** (Alakazam): HP 55 / Atk 50 / Def 45 / Sp.Atk 135 / Sp.Def 95 / Speed 120"
+    ]
+  },
+  {
+    "question": "What is unusual about how Kadabra evolves into Alakazam?",
+    "ground_truth": "Kadabra evolves into Alakazam via a trade rather than by leveling up or using an evolution stone.",
+    "reference_contexts": [
+      "**Research Note**: Kadabra's evolution to Alakazam famously requires a trade rather than a level threshold or stone—an anomaly Sabrina's facility studies as evidence that some evolutionary leaps require an external psychological catalyst."
+    ]
+  },
+  {
+    "question": "Which legendary bird guards the Seafoam Islands, and what type is it?",
+    "ground_truth": "Articuno, an Ice/Flying type, guards Seafoam Islands.",
+    "reference_contexts": [
+      "### Articuno (Ice/Flying)\n\n* Guardian of Seafoam Islands.  \n* **Lore**: Articuno's cry is said to chill the air, influencing fish migration."
+    ]
+  },
+  {
+    "question": "What type is Mewtwo, and where is it found?",
+    "ground_truth": "Mewtwo is a Psychic type found in Cerulean Cave.",
+    "reference_contexts": [
+      "### Mewtwo (Psychic)\n\n* Genetic apex, Cerulean Cave.  \n* **Lore**: Mewtwo embodies ethical debates about cloning and sentience; field reports emphasize complex behavior beyond simple aggression."
+    ]
+  },
+  {
+    "question": "What Pokémon make up Lorelei's team in the Elite Four?",
+    "ground_truth": "Lorelei leads with Dewgong and Lapras.",
+    "reference_contexts": [
+      "### Lorelei (Ice/Water)\n\n* Leads with Dewgong, Lapras.  \n* **Lore**: Lorelei's tactics focus on attrition and crowd control; her lineup reflects an understanding of phase changes and thermal shock."
+    ]
+  },
+  {
+    "question": "What evolution stone turns Growlithe into Arcanine?",
+    "ground_truth": "A Fire Stone evolves Growlithe into Arcanine.",
+    "reference_contexts": [
+      "**Evolution Stones**: Thunder Stone (Pikachu → Raichu), Water Stone (e.g. Poliwhirl → Poliwrath, Shellder → Cloyster), Fire Stone (e.g. Growlithe → Arcanine, Vulpix → Ninetales), Leaf Stone (e.g. Gloom → Vileplume, Weepinbell → Victreebel), Moon Stone (Clefairy → Clefable, Jigglypuff → Wigglytuff)."
+    ]
+  },
+  {
+    "question": "What are Snorlax's notable traits and how do you encounter one?",
+    "ground_truth": "Snorlax is an immovable wall that requires a Poké Flute encounter to wake it up. Its sleep cycles shape local human settlement patterns, and it has extraordinary digestive efficiency enabling enormous energy storage.",
+    "reference_contexts": [
+      "#### Snorlax\n\n* Immovable wall. Requires Poké Flute encounter.  \n* **Lore**: Snorlax sleep cycles shape local human settlement patterns—farms avoid habitual nap zones. Metabolic studies reveal extraordinary digestive efficiency, enabling enormous energy storage."
+    ]
+  },
+  {
+    "question": "In the strategy case study, how does Ash's Pikachu defeat Lt. Surge's Raichu?",
+    "ground_truth": "Pikachu defeats Raichu through superior speed, demonstrating that evolution is not always the superior path.",
+    "reference_contexts": [
+      "### Ash vs Lt. Surge\n\n* Pikachu defeats Raichu through speed, showing evolution is not always the superior path.  \n* **Lore/Analysis**: Demonstrates how signature bond and atypical technique can overcome raw stat advantages."
+    ]
+  },
+  {
+    "question": "What typing does Gyarados have, and what is its base Attack stat?",
+    "ground_truth": "Gyarados is a Water/Flying type with a base Attack stat of 125.",
+    "reference_contexts": [
+      "#### Magikarp → Gyarados\n\n* **Typing**: Water (→ Water/Flying)  \n* **Base Stats** (Gyarados): HP 95 / Atk 125 / Def 79 / Sp.Atk 60 / Sp.Def 100 / Speed 81"
+    ]
+  },
+  {
+    "question": "What Pokémon does Sabrina use as the Saffron Gym Leader?",
+    "ground_truth": "Sabrina, the Psychic-type Gym Leader of Saffron, uses Kadabra and Alakazam.",
+    "reference_contexts": [
+      "### Sabrina (Saffron, Psychic)\n\n* Pokémon: Kadabra, Alakazam.  \n* Lore: Psychic dominance; rumored split personality."
+    ]
+  },
+  {
+    "question": "What is the recommended counter strategy against Koga's Poison-type gym?",
+    "ground_truth": "Psychic sweepers are the recommended counter tactic against Koga's team.",
+    "reference_contexts": [
+      "### Koga (Fuchsia, Poison)\n\n* Pokémon: Koffing, Muk, Weezing, Venomoth.  \n* Counter Tactic: Psychic sweepers."
+    ]
+  },
+  {
+    "question": "What HMs are available in Kanto, and how many are permanent?",
+    "ground_truth": "The Kanto HMs are Cut, Fly, Surf, Strength, and Flash, and all five are permanent, unlike TMs which are one-use.",
+    "reference_contexts": [
+      "* HMs (permanent): Cut, Fly, Surf, Strength, Flash.  \n* TMs: One-use, often rare (Thunderbolt, Ice Beam, Earthquake)."
+    ]
+  }
+]
