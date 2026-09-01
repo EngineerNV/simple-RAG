@@ -23,18 +23,18 @@ python scripts/02_query.py -q "What is the pipeline?" --agent-mode pretend
 
 **The `langchain` family in `requirements.txt` is pinned, not loose.** `chat_engine.py` uses the legacy `langchain.memory.ConversationSummaryBufferMemory`, which was removed in `langchain>=1.0` — an unpinned install silently resolves to a version that breaks the chat CLI/TUI at import time. Bump the pinned set together (see the comment above it in `requirements.txt`), never one package at a time, and re-run `python -m pytest -q` plus a real chat session after.
 
-Environment variables:
+Environment variables & multi-model flexibility:
 
 - **Auto-detected multi-provider support**: Set any one of these keys and the scripts will automatically detect the provider:
-  - `OPENAI_API_KEY` — for OpenAI models (checked first)
-  - `GOOGLE_API_KEY` — for Google Gemini models (checked second)
-  - `ANTHROPIC_API_KEY` — for Anthropic Claude models (checked third)
-- Override auto-detection with `--provider openai|gemini|claude` flag
+  - `OPENAI_API_KEY` — for OpenAI models (checked first; e.g. `gpt-4o`, `gpt-4o-mini`, `gpt-5-mini`)
+  - `GOOGLE_API_KEY` — for Google Gemini models (checked second; e.g. `gemini-1.5-flash`, `gemini-1.5-pro`)
+  - `ANTHROPIC_API_KEY` — for Anthropic Claude models (checked third; e.g. `claude-3-5-sonnet-20241022`, `claude-haiku-4-5`)
+- **Flexible Model Selection**: Any script running LLM calls (`02_query.py`, `04_llm_api.py`, `05_chat_cli.py`, `06_chat_tui.py`, `07_ragas_eval.py`) supports selecting a target model via `--llm-model <model-name>` and overriding the provider via `--provider openai|gemini|claude`.
 - Install provider dependencies as needed:
   - `pip install langchain-openai` (default, usually already present)
   - `pip install langchain-google-genai` (for Gemini)
   - `pip install langchain-anthropic` (for Claude)
-- **Note:** Only ONE API key is needed. The first key found determines the provider unless you explicitly override with `--provider`.
+- **Note:** Only ONE API key is needed for basic operation, but you can configure multiple and switch dynamically using `--provider` and `--llm-model`.
 
 Quick .env setup (Windows PowerShell):
 
@@ -70,6 +70,8 @@ Core pipeline (numbered in run order):
 8) `scripts/06_chat_tui.py` — full-screen Textual TUI for the same chat pipeline: scrollable chat log, input box, and a live context sidebar (also built on `chat_engine.ChatEngine`, no pipeline logic duplicated). `ctrl+r` resets, `ctrl+s` saves the transcript, `/exit` quits.
 
 9) `scripts/07_ragas_eval.py` — scores the pipeline against `data/eval/golden_qa.json` with [RAGAS](https://github.com/explodinggremlins/ragas) (Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall). Requires `requirements-eval.txt` and an API key for whichever provider is set as the judge (`--judge-provider`/`--judge-model`, defaults to the same provider/model as the pipeline under test). See "RAGAS evaluation" below.
+
+10) `scripts/08_eval_tui.py` — full-screen Textual TUI evaluation dashboard allowing users to configure arguments and trigger Human Quiz, Lexical Heuristic Eval, and RAGAS LLM-Judge Eval workflows with real-time log output streaming.
 
 Agent orchestration and utils:
 
@@ -128,8 +130,12 @@ Now contrast a *bad* structure for the same content — bundling several species
 
 This produces **one chunk covering both species**, tagged only `{"###": "Poison Types"}` — a retrieval hit for "Muk" surfaces a chunk that's half about Weezing too, and there's no metadata distinguishing which species is which. This is exactly the bug a Codex review caught in this repo (PR #25): converting the bullet-per-entity sections to heading-per-entity fixed both the missing metadata *and*, once headings are stripped from `page_content`, a follow-up bug where the entity's own name disappeared from the embeddable/searchable text entirely (fixed by re-prepending the heading — see the docstring). **The rule for new corpus content: one heading per thing you want to be independently retrievable and citable.**
 
-## Reranker (where and how)
+## Reranker & Embedding Flexibility
 
+- **Embedding & Reranker Choice**: `HuggingFaceEmbeddings` (`sentence-transformers/all-MiniLM-L6-v2`) and the cross-encoder reranker (`ms-marco-MiniLM-L-6-v2` with lexical blend fallback) are reference choices chosen for local, zero-cost, CPU-compatible execution. They serve as concrete examples of dense retrieval and cross-encoder reranking.
+- **Pluggability**: The pipeline architecture is intentionally decoupled:
+  - Embeddings in `01_build_index.py` and `chat_engine.py` can be swapped for OpenAI, Google Gemini, Cohere, or custom embedding classes.
+  - Reranking in `scripts/02_query.py` (`rerank_results`) can be replaced with commercial reranking APIs (Cohere, Jina, Voyage AI) or alternative local models (FlashRank, BGE-Reranker) without modifying `chat_engine.py` or the UI frontends (`05_chat_cli.py`, `06_chat_tui.py`).
 - Location: `scripts/02_query.py` → `rerank_results(results, question, alpha=0.5, use_cross_encoder=True)`.
 - Default method: a local cross-encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`, via `sentence-transformers`, lazily loaded once at module level) scores each `(question, doc)` pair jointly and writes a sigmoid-normalized `combined_score`/`cross_encoder_score` to `doc.metadata`. Catches semantic relevance (synonyms, paraphrase, word order) the lexical blend can't.
 - Fallback method: if the cross-encoder can't load (missing dependency, offline environment) or `use_cross_encoder=False` is passed, falls back to the original lightweight lexical blend — min–max normalize the retriever score, compute lexical overlap via regex tokenization, blend by `combined = alpha * retriever_norm + (1-alpha) * lexical`. Tests force this path (`use_cross_encoder=False`) to avoid depending on a downloaded ML model.

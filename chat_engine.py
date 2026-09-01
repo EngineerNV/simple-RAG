@@ -15,7 +15,13 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
-from langchain.memory import ConversationSummaryBufferMemory
+try:
+    from langchain.memory import ConversationSummaryBufferMemory
+except ImportError:
+    try:
+        from langchain_classic.memory import ConversationSummaryBufferMemory
+    except ImportError:
+        from langchain_community.memory import ConversationSummaryBufferMemory
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser

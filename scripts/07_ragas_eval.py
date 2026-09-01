@@ -61,6 +61,9 @@ except Exception:
 # forward-looking deprecation notice (ragas.metrics.collections is the
 # eventual replacement); harmless today, silenced to keep output readable.
 warnings.filterwarnings("ignore", message=r".*is deprecated and will be removed in v1\.0.*")
+# Same deal for ragas.llms.base.LangchainLLMWrapper (llm_factory is the
+# eventual replacement) -- used below for the reasoning-model judge path.
+warnings.filterwarnings("ignore", message=r".*LangchainLLMWrapper is deprecated.*")
 
 from chat_engine import CHROMA_DIR, DEFAULT_EMBED_MODEL, DEFAULT_LLM_MODEL, ChatEngine, ChatEngineConfig
 from utils.llm_provider import resolve_provider_and_key
@@ -253,6 +256,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         sys.exit(1)
     judge_model_name = args.judge_model or args.llm_model
     from chat_engine import load_chat_model
+    from utils.llm_provider import is_openai_reasoning_model
 
     judge_llm = load_chat_model(
         provider=judge_provider,
@@ -262,6 +266,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         max_tokens=args.max_tokens,
         base_url=None,
     )
+    if judge_provider.lower() == "openai" and is_openai_reasoning_model(judge_model_name):
+        # RAGAS overrides temperature per-call for its own metric machinery
+        # (self-consistency sampling, NLI decomposition, etc.), but OpenAI's
+        # reasoning-family models (o1/o3/o4, gpt-5+) reject any non-default
+        # temperature outright. RAGAS anticipates exactly this case --
+        # LangchainLLMWrapper(..., bypass_temperature=True) skips those
+        # per-call overrides so the judge model's own default is used.
+        from ragas.llms.base import LangchainLLMWrapper
+
+        judge_llm = LangchainLLMWrapper(judge_llm, bypass_temperature=True)
     print(f"Scoring {len(samples)} samples with RAGAS (judge={judge_provider}/{judge_model_name})...")
 
     result = run_ragas(samples, judge_llm, engine.store.embeddings)

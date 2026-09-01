@@ -34,6 +34,8 @@ from langchain_core.messages import AIMessage  # Represent the structured respon
 from langchain_core.prompts import ChatPromptTemplate  # Build message templates for question + context prompts
 
 from utils.llm_provider import (
+    MissingProviderDependencyError,
+    UnsupportedProviderError,
     auto_detect_provider,
     build_chat_model,
     resolve_provider_and_key,
@@ -213,14 +215,18 @@ def main() -> None:
         print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.")
         sys.exit(1)
 
-    client = build_llm_client(
-        api_key=api_key,
-        model_name=args.model,
-        provider=provider,
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
-        base_url=args.base_url,
-    )
+    try:
+        client = build_llm_client(
+            api_key=api_key,
+            model_name=args.model,
+            provider=provider,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            base_url=args.base_url,
+        )
+    except (UnsupportedProviderError, MissingProviderDependencyError) as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
 
     prompt = assemble_prompt(args.question, contexts, instructions=args.instructions)
     response, latency = call_llm(prompt, client)

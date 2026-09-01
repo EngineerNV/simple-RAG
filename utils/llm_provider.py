@@ -70,6 +70,16 @@ def resolve_provider_and_key(explicit_key: str | None, provider_hint: str | None
     return (provider_hint or "openai", None)
 
 
+def is_openai_reasoning_model(model_name: str) -> bool:
+    """True for OpenAI's reasoning-family models (o1/o3/o4, gpt-5+), which
+    reject the legacy ``max_tokens``/non-default-``temperature`` params that
+    the pinned langchain-openai==0.1.25 always sends -- see the workarounds
+    in ``build_chat_model`` below.
+    """
+    name = model_name.lower()
+    return name.startswith(("o1", "o3", "o4", "gpt-5"))
+
+
 def build_chat_model(
     provider: str,
     model_name: str,
@@ -91,10 +101,24 @@ def build_chat_model(
             ) from exc
         init_kwargs = {
             "model": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
             "openai_api_key": api_key,
         }
+        if is_openai_reasoning_model(model_name):
+            # temperature=1 (the only value these models accept) and
+            # max_completion_tokens via model_kwargs (the renamed limit
+            # param) route around what the pinned client would otherwise
+            # send. tiktoken_model_name="gpt-4" is a separate workaround:
+            # ConversationSummaryBufferMemory's token counting raises
+            # NotImplementedError for any model name it doesn't recognize,
+            # so this points it at a recognized one -- an approximation
+            # (different tokenizer), fine for a buffer-pruning trigger but
+            # never for actual token billing.
+            init_kwargs["temperature"] = 1
+            init_kwargs["model_kwargs"] = {"max_completion_tokens": max_tokens}
+            init_kwargs["tiktoken_model_name"] = "gpt-4"
+        else:
+            init_kwargs["temperature"] = temperature
+            init_kwargs["max_tokens"] = max_tokens
         if base_url:
             init_kwargs["openai_api_base"] = base_url
         return ChatOpenAI(**init_kwargs)

@@ -11,12 +11,15 @@ ragas==0.4.3
 
 # ragas's own transitive dependencies, pinned to versions that don't drag in
 # an incompatible openai/langchain-core (openai in particular: ragas's
-# instructor dependency wants openai>=2.0 by default, which breaks
-# langchain-openai==0.1.25's own <2.0 requirement from requirements.txt).
+# instructor dependency wants openai>=2.0 starting at instructor==1.13.0,
+# which breaks langchain-openai==0.1.25's own <2.0 requirement from
+# requirements.txt -- instructor==1.12.0 is the last release before that
+# flip and is the pin below; do not bump instructor past 1.12.x without
+# also re-checking this constraint).
 appdirs==1.4.4
 datasets==5.0.1
 diskcache==5.6.3
-instructor==1.15.4
+instructor==1.12.0
 nest-asyncio==1.6.0
 networkx==3.6.1
 numpy==1.26.4
