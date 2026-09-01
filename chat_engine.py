@@ -43,6 +43,7 @@ from utils import (
     topic_gate,
 )
 from utils.llm_provider import resolve_provider_and_key
+from utils.semantic_cache import SemanticCache, cached_retrieve_and_rerank
 
 query_module = import_module("scripts.02_query")
 
@@ -81,6 +82,9 @@ class ChatEngineConfig:
     base_url: Optional[str] = None
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     retrieval_k: int = 3
+    enable_semantic_cache: bool = True
+    semantic_cache_size: int = 20
+    semantic_cache_similarity_threshold: float = 0.93
 
 
 @dataclass
@@ -181,9 +185,30 @@ class ChatEngine:
     def __init__(self, config: ChatEngineConfig):
         self.config = config
 
-        _, self.store = create_retrieval_store(
+        self.embedder, self.store = create_retrieval_store(
             model_name=config.embedding_model, persist_dir=Path(config.persist_dir)
         )
+
+        # Semantic result cache: skips retrieval+rerank for near-duplicate
+        # queries. Only built when there's an embedder to drive the
+        # similarity lookup -- e.g. tests stub `create_retrieval_store` to
+        # return `(None, ...)`, and the pipeline degrades to uncached
+        # retrieval in that case rather than failing. See
+        # utils/semantic_cache.py for how/why this cache is designed the
+        # way it is.
+        self.semantic_cache: Optional[SemanticCache] = None
+        self._cached_retrieve = None
+        if config.enable_semantic_cache and self.embedder is not None:
+            self.semantic_cache = SemanticCache(
+                max_size=config.semantic_cache_size,
+                similarity_threshold=config.semantic_cache_similarity_threshold,
+            )
+            self._cached_retrieve = cached_retrieve_and_rerank(
+                cache=self.semantic_cache,
+                embed_fn=self.embedder.embed_query,
+                retrieve_fn=retrieve_contexts,
+                rerank_fn=rerank_results,
+            )
 
         provider, api_key = resolve_provider_and_key(config.api_key, config.provider)
         if not api_key:
@@ -275,16 +300,21 @@ class ChatEngine:
             logger.debug("Decider verdict: %s", decision_payload)
 
             if use_rag:
+                # When the semantic cache is active it already reranks
+                # internally on a miss (see cached_retrieve_and_rerank), so
+                # rerank_fn is only passed here for the uncached fallback.
+                retrieve_fn = self._cached_retrieve or retrieve_contexts
+                rerank_fn = None if self._cached_retrieve else rerank_results
                 rewrite, results = apply_rewrite_and_retrieve(
                     rewriter_llm=self.rewriter_llm,
-                    retrieve_contexts_fn=retrieve_contexts,
+                    retrieve_contexts_fn=retrieve_fn,
                     store=self.store,
                     user_message=user_message,
                     history_adapter=self.history_adapter,
                     rag_topics=RAG_TOPIC_INVENTORY,
                     k=self.config.retrieval_k,
                     use_namespace_filter=False,
-                    rerank_fn=rerank_results,
+                    rerank_fn=rerank_fn,
                 )
                 rewrite_payload = rewrite.model_dump() if hasattr(rewrite, "model_dump") else rewrite.dict()
                 logger.debug("Query rewrite produced: %s", rewrite_payload)

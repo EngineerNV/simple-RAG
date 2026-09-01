@@ -80,6 +80,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--show-context", action="store_true", help="Display retrieved snippets for each answer")
     parser.add_argument("--save-transcript", dest="transcript_path", help="Optional file path to write the chat transcript on exit")
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging to stderr")
+    parser.add_argument("--semantic-cache-size", type=int, default=20, help="Max entries in the semantic result cache (LRU)")
+    parser.add_argument("--semantic-cache-threshold", type=float, default=0.93, help="Cosine similarity required for a semantic cache hit")
+    parser.add_argument("--no-semantic-cache", dest="enable_semantic_cache", action="store_false", help="Disable the semantic result cache")
     return parser.parse_args(argv)
 
 
@@ -131,6 +134,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         base_url=args.base_url,
         system_prompt=args.system_prompt,
         retrieval_k=args.retrieval_k,
+        enable_semantic_cache=args.enable_semantic_cache,
+        semantic_cache_size=args.semantic_cache_size,
+        semantic_cache_similarity_threshold=args.semantic_cache_threshold,
     )
 
     try:
