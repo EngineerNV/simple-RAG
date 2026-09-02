@@ -496,7 +496,7 @@ python scripts/03_eval.py --in data/eval/sample.json --out reports/sample_eval.j
 python scripts/03_quiz.py --questions data/questions/dev.json --agent-mode pretend --k 3 --out data/human_review.jsonl --resume
 ```
 
-> ⚠️ `03_quiz.py` requires an API key in the environment even in `none`/`pretend` mode — it resolves a provider/key unconditionally at startup and exits if none is found. See [Troubleshooting](#troubleshooting--faq).
+> 💡 `03_quiz.py` and `03_eval.py` run in `none`/`pretend` modes without requiring any API keys. An API key is only required when running in live `--agent-mode llm`.
 
 </details>
 
@@ -892,8 +892,8 @@ You installed `requirements-min.txt`, which deliberately omits `sentence-transfo
 **Using an OpenAI reasoning-family model (`gpt-5*`, `o1`, `o3`, `o4`) — as the pipeline model, judge model, or both.**
 These models reject the classic `max_tokens`/non-default-`temperature` chat-completions parameters that the pinned `langchain-openai==0.1.25` always sends, and the legacy conversation-memory class can't count their tokens either. All three are already worked around: `utils/llm_provider.py::is_openai_reasoning_model()` detects these models and routes around the first two constraints, and `07_ragas_eval.py` additionally wraps the judge model with RAGAS's own `LangchainLLMWrapper(..., bypass_temperature=True)` so RAGAS's per-metric temperature overrides don't hit the same wall. Nothing to configure — this is automatic — but if you see a `400 BadRequestError` mentioning `max_tokens` or `temperature` from OpenAI, or a `NotImplementedError` from `get_num_tokens_from_messages`, you've likely hit a model name these detectors don't yet recognize (e.g. a future model family) — check `is_openai_reasoning_model()`'s prefix list.
 
-**`03_quiz.py` exits immediately even in `--agent-mode pretend`, saying no API key was found.**
-This is a real quirk, not a documentation gap — `03_quiz.py` resolves a provider/key at startup unconditionally, even in modes that don't call an LLM. Set any one of `OPENAI_API_KEY` / `GOOGLE_API_KEY` / `ANTHROPIC_API_KEY` before running it, regardless of `--agent-mode`.
+**Do `03_quiz.py` or `03_eval.py` require an API key?**
+Only if you choose `--agent-mode llm`. When running with `--agent-mode none` or `--agent-mode pretend`, answers are generated locally from retrieved context or formatted with mock citations without making any network calls or requiring an API key.
 
 - What is the input for RAGAS? The golden set at `data/eval/golden_qa.json`.
 - What does it evaluate? Faithfulness, Answer Relevancy, Context Precision, Context Recall — see [§5](#evaluation-two-ways).

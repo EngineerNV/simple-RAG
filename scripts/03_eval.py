@@ -17,6 +17,10 @@ from importlib import import_module
 from pathlib import Path
 from typing import Iterable, List, Mapping, MutableMapping, Sequence
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 
 def load_eval_data(filepath: Path) -> List[Mapping[str, str]]:
     """Load evaluation data from JSON (list of dicts) or CSV (headers: question,answer,context).
@@ -318,18 +322,18 @@ def main() -> None:
         
         query_module = _load_query_module()
         provider, api_key = query_module.resolve_provider_and_key(args.api_key, args.provider)
-        
-        if not api_key:
+
+        if args.agent_mode == "llm" and not api_key:
             print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.")
             sys.exit(1)
-        
+
         raw_examples = generate_predictions(
             questions=questions,
             k=args.k,
             agent_mode=args.agent_mode,
             model_name=args.model,
             llm_model=args.llm_model,
-            provider=args.provider,
+            provider=provider,
             api_key=api_key,
             temperature=args.temperature,
             max_tokens=args.max_tokens,
