@@ -1,0 +1,252 @@
+[
+  {
+    "question": "What are Pikachu's base stats and signature moves?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "How does Pikachu evolve into Raichu?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What Pokémon does Gym Leader Brock use, and what type is his gym?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What type is Alakazam, and what are its base stats?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What is unusual about how Kadabra evolves into Alakazam?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "Which legendary bird guards the Seafoam Islands, and what type is it?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What type is Mewtwo, and where is it found?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What Pokémon make up Lorelei's team in the Elite Four?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What evolution stone turns Growlithe into Arcanine?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What are Snorlax's notable traits and how do you encounter one?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "In the strategy case study, how does Ash's Pikachu defeat Lt. Surge's Raichu?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What typing does Gyarados have, and what is its base Attack stat?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What Pokémon does Sabrina use as the Saffron Gym Leader?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What is the recommended counter strategy against Koga's Poison-type gym?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What HMs are available in Kanto, and how many are permanent?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What three elemental Pokémon can Eevee evolve into using stones in Kanto, and what are their typings?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "Why does Misty's Psyduck experience chronic headaches, and what happens when the headache peaks?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What does Cubone wear on its head, and where is its lore tied to departed Marowak guardians?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What is unique about Porygon's creation, and what company developed it?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "How was Sabrina's suppressed personality re-integrated during Ash's gym resolution with Haunter?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What ethical lesson does Ash's release of his Butterfree demonstrate?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What role did the Squirtle Squad take on after being rehabilitated from rogue pranksters?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "Where is Pinsir found, and what species does it have territorial feuds with?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "What item does Farfetch'd carry, and what is it used for?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  },
+  {
+    "question": "In the Cinnabar Gym strategy case study, how does Ash earn Charizard's cooperation against Blaine's Magmar?",
+    "answer": null,
+    "context": null,
+    "overlap_ratio": 0.0,
+    "faithful": false,
+    "abstain": true,
+    "context_length": 0,
+    "context_list": []
+  }
+]
