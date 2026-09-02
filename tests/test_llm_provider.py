@@ -42,10 +42,24 @@ def test_resolve_provider_and_key(monkeypatch: pytest.MonkeyPatch) -> None:
     # Only explicit key, no env vars -> default to openai
     assert resolve_provider_and_key("custom-key", None) == ("openai", "custom-key")
 
-    # Env var present + explicit provider hint
+    # Multiple env keys present: provider hint picks the specific key
+    monkeypatch.setenv("OPENAI_API_KEY", "env-openai-key")
     monkeypatch.setenv("GOOGLE_API_KEY", "env-goog-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-ant-key")
+    assert resolve_provider_and_key(None, "gemini") == ("gemini", "env-goog-key")
+    assert resolve_provider_and_key(None, "claude") == ("claude", "env-ant-key")
+    assert resolve_provider_and_key(None, "openai") == ("openai", "env-openai-key")
+    assert resolve_provider_and_key(None, None) == ("openai", "env-openai-key")
+
+    # Provider hint when only another key exists (fallback)
+    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
     assert resolve_provider_and_key(None, "claude") == ("claude", "env-goog-key")
-    assert resolve_provider_and_key(None, None) == ("gemini", "env-goog-key")
+
+    # No keys present anywhere
+    monkeypatch.delenv("GOOGLE_API_KEY")
+    assert resolve_provider_and_key(None, None) == ("openai", None)
+    assert resolve_provider_and_key(None, "gemini") == ("gemini", None)
 
 
 def test_is_openai_reasoning_model() -> None:
