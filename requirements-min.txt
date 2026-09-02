@@ -1,5 +1,10 @@
-langchain
-langchain-openai
+# Minimal lightweight stack for simple-RAG (pinned for memory compatibility)
+langchain==0.2.16
+langchain-core==0.2.43
+langchain-community==0.2.16
+langchain-text-splitters==0.2.4
+langchain-openai==0.1.25
+openai
 chromadb==0.6.3
 python-dotenv
 pydantic
