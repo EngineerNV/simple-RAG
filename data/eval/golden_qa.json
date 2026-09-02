@@ -103,5 +103,75 @@
     "reference_contexts": [
       "* HMs (permanent): Cut, Fly, Surf, Strength, Flash.  \n* TMs: One-use, often rare (Thunderbolt, Ice Beam, Earthquake)."
     ]
+  },
+  {
+    "question": "What three elemental Pokémon can Eevee evolve into using stones in Kanto, and what are their typings?",
+    "ground_truth": "In Kanto, Eevee can evolve into Vaporeon (Water), Jolteon (Electric), or Flareon (Fire) using elemental stones.",
+    "reference_contexts": [
+      "#### Eevee → Vaporeon / Jolteon / Flareon\n\n* **Typing**: Normal (→ Water / Electric / Fire)  \n* **Habitat**: Celadon Mansion, urban residences, and Silph Co. research facilities.  \n* **Base Stats** (Vaporeon): HP 130 / Atk 65 / Def 60 / Sp.Atk 110 / Sp.Def 95 / Speed 65  \n* **Base Stats** (Jolteon): HP 65 / Atk 65 / Def 60 / Sp.Atk 110 / Sp.Def 95 / Speed 130  \n* **Base Stats** (Flareon): HP 65 / Atk 130 / Def 60 / Sp.Atk 95 / Sp.Def 110 / Speed 65  \n* **Moves**: Water Gun, Hydro Pump (Vaporeon); Thundershock, Pin Missile (Jolteon); Ember, Fire Blast (Flareon)."
+    ]
+  },
+  {
+    "question": "Why does Misty's Psyduck experience chronic headaches, and what happens when the headache peaks?",
+    "ground_truth": "Psyduck's chronic headache is caused by intense brainwave activity bypassing conscious control. When severe headache stress peaks, Psyduck exhibits involuntary psychic eruptions.",
+    "reference_contexts": [
+      "#### Psyduck → Golduck\n\n* **Typing**: Water (with latent Psychic talent)  \n* **Habitat**: Cerulean City canals, Route 24 ponds, and misty lake edges.  \n* **Base Stats** (Golduck): HP 80 / Atk 82 / Def 78 / Sp.Atk 95 / Sp.Def 80 / Speed 85  \n* **Moves**: Scratch, Tail Whip, Water Gun, Confusion, Disable.  \n* **Field Role**: Misty's unpredictable wildcard; exhibits involuntary psychic eruptions when severe headache stress peaks.  \n* **Lore**: Psyduck's chronic headache is caused by intense brainwave activity bypassing conscious control; Cerulean Gym research treats Psyduck's erratic telekinesis as a case study in involuntary psychic surge mechanics."
+    ]
+  },
+  {
+    "question": "What does Cubone wear on its head, and where is its lore tied to departed Marowak guardians?",
+    "ground_truth": "Cubone wears the skull of its deceased mother, and its lore is deeply tied to the solemn spirit connection with departed Marowak guardians at Pokémon Tower in Lavender Town.",
+    "reference_contexts": [
+      "#### Cubone → Marowak\n\n* **Typing**: Ground  \n* **Habitat**: Pokémon Tower grounds in Lavender Town and rocky hillsides near Rock Tunnel.  \n* **Base Stats** (Marowak): HP 60 / Atk 80 / Def 110 / Sp.Atk 50 / Sp.Def 80 / Speed 45  \n* **Moves**: Bone Club, Headbutt, Bonemerang, Thrash.  \n* **Field Role**: Defensive Ground physical striker; uses thick bone armor for leverage and projectile ricochets.  \n* **Lore**: Cubone wears the skull of its deceased mother; Lavender Town folklore is deeply tied to the solemn spirit connection between Cubone and departed Marowak guardians at Pokémon Tower."
+    ]
+  },
+  {
+    "question": "What is unique about Porygon's creation, and what company developed it?",
+    "ground_truth": "Porygon is the first completely man-made Pokémon generated entirely from computer code by Silph Co. engineers, designed for unassisted space and digital exploration.",
+    "reference_contexts": [
+      "#### Porygon\n\n* **Typing**: Normal (Digital Code)  \n* **Habitat**: Silph Co. Saffron Laboratories and Celadon Game Corner prize vaults.  \n* **Base Stats**: HP 65 / Atk 60 / Def 70 / Sp.Atk 85 / Sp.Def 75 / Speed 40  \n* **Moves**: Conversion, Psybeam, Recover, Tri Attack.  \n* **Field Role**: Synthetic utility; converts its body code data to match target defensive typings.  \n* **Lore**: Porygon is the first completely man-made Pokémon generated entirely from computer code by Silph Co. engineers, designed for unassisted space and digital exploration."
+    ]
+  },
+  {
+    "question": "How was Sabrina's suppressed personality re-integrated during Ash's gym resolution with Haunter?",
+    "ground_truth": "Sabrina's suppressed personality was re-integrated when Haunter's playful antics induced laughter, demonstrating that battle resolution can occur outside formal KO parameters.",
+    "reference_contexts": [
+      "### Ash's Haunter vs. Sabrina's Kadabra\n\n* Demonstrates breaking an invincible Psychic Gym Leader's emotional rigidity not through brute force, but through unexpected humor and emotional liberation.  \n* **Lore/Analysis**: Sabrina's suppressed personality was re-integrated when Haunter's playful antics induced laughter, demonstrating that battle resolution can occur outside formal KO parameters."
+    ]
+  },
+  {
+    "question": "What ethical lesson does Ash's release of his Butterfree demonstrate?",
+    "ground_truth": "Ash's release of his first captured Butterfree highlights the ethical responsibility of trainers to prioritize species lifecycle needs over personal ownership during seasonal mating migrations.",
+    "reference_contexts": [
+      "### Bye Bye Butterfree (Migration & Release)\n\n* Documents the natural seasonal oceanic mating migration of Kanto Butterfree across the archipelago.  \n* **Lore/Analysis**: Ash's release of his first captured Pokémon highlights the ethical responsibility of trainers to prioritize species lifecycle needs over personal ownership."
+    ]
+  },
+  {
+    "question": "What role did the Squirtle Squad take on after being rehabilitated from rogue pranksters?",
+    "ground_truth": "The Squirtle Squad was transformed from rogue pranksters into Fuchsia/Vermilion's official civil firefighting unit.",
+    "reference_contexts": [
+      "### The Squirtle Squad (Civil Service & Firefighting)\n\n* An abandoned Squirtle gang transformed from rogue pranksters into Fuchsia/Vermilion's official civil firefighting unit.  \n* **Lore/Analysis**: Illustrates how urban wild Pokémon rehabilitations succeed when surplus energy and team coordination are redirected into community safety."
+    ]
+  },
+  {
+    "question": "Where is Pinsir found, and what species does it have territorial feuds with?",
+    "ground_truth": "Pinsir is found in Safari Zone tall grass and dense forest thickets, and it has intense territorial feuds with wild Scyther populations.",
+    "reference_contexts": [
+      "#### Pinsir\n\n* **Typing**: Bug  \n* **Habitat**: Safari Zone tall grass and dense forest thickets.  \n* **Base Stats**: HP 65 / Atk 125 / Def 100 / Sp.Atk 55 / Sp.Def 70 / Speed 85  \n* **Moves**: Vice Grip, Seismic Toss, Guillotine, Harden.  \n* **Field Role**: Physical Bug powerhouse; Safari Zone counterpart to Scyther.  \n* **Lore**: Pinsir's horns can snap thick saplings; intense territorial feuds between wild Pinsir and Scyther populations are monitored by Fuchsia Zone rangers."
+    ]
+  },
+  {
+    "question": "What item does Farfetch'd carry, and what is it used for?",
+    "ground_truth": "Farfetch'd carries a specific stalk of green onion/leek used as a weapon lever and nest material.",
+    "reference_contexts": [
+      "#### Farfetch'd\n\n* **Typing**: Normal/Flying  \n* **Habitat**: Rare sightings along Route 12 and Vermilion outskirts.  \n* **Base Stats**: HP 52 / Atk 65 / Def 55 / Sp.Atk 58 / Sp.Def 62 / Speed 60  \n* **Moves**: Peck, Sand Attack, Slash, Swords Dance.  \n* **Lore**: Farfetch'd carries a specific stalk of green onion/leek used as a weapon lever and nest material; conservation programs guard the species from over-harvesting due to historical rarity."
+    ]
+  },
+  {
+    "question": "In the Cinnabar Gym strategy case study, how does Ash earn Charizard's cooperation against Blaine's Magmar?",
+    "ground_truth": "Ash earns Charizard's cooperation through trust rather than brute force.",
+    "reference_contexts": [
+      "### Charizard vs Magmar (Blaine)\n\n* Trust earns Charizard's cooperation; highlights bond over brute force."
+    ]
   }
 ]

@@ -51,10 +51,10 @@ def test_resolve_provider_and_key(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resolve_provider_and_key(None, "openai") == ("openai", "env-openai-key")
     assert resolve_provider_and_key(None, None) == ("openai", "env-openai-key")
 
-    # Provider hint when only another key exists (fallback)
+    # Provider hint when only another key exists (returns None for key to prevent key leakage)
     monkeypatch.delenv("OPENAI_API_KEY")
     monkeypatch.delenv("ANTHROPIC_API_KEY")
-    assert resolve_provider_and_key(None, "claude") == ("claude", "env-goog-key")
+    assert resolve_provider_and_key(None, "claude") == ("claude", None)
 
     # No keys present anywhere
     monkeypatch.delenv("GOOGLE_API_KEY")

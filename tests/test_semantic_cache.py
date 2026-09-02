@@ -111,6 +111,19 @@ def test_invalid_similarity_threshold_rejected() -> None:
         SemanticCache(similarity_threshold=1.5)
 
 
+def test_exact_text_hit_without_embedding_argument() -> None:
+    cache = SemanticCache(max_size=5, similarity_threshold=0.93)
+    cache.put("what is a chunk?", [1.0, 0.0, 0.0], k=3, value="chunk answer")
+
+    # Passing embedding=None should still hit exact match without error.
+    result = cache.get("what is a chunk?", embedding=None, k=3)
+
+    assert result == "chunk answer"
+    assert cache.stats.hits_exact == 1
+    assert cache.stats.hits_semantic == 0
+    assert cache.stats.misses == 0
+
+
 class _Counter:
     def __init__(self) -> None:
         self.calls = 0
@@ -118,8 +131,10 @@ class _Counter:
 
 def test_cached_retrieve_and_rerank_skips_work_on_hit() -> None:
     cache = SemanticCache(max_size=5, similarity_threshold=0.93)
+    embed_calls = _Counter()
     retrieve_calls = _Counter()
     rerank_calls = _Counter()
+    received_queries = []
 
     embeddings = {
         "when did the band debut?": [1.0, 0.0, 0.0],
@@ -128,10 +143,12 @@ def test_cached_retrieve_and_rerank_skips_work_on_hit() -> None:
     }
 
     def fake_embed(text: str):
+        embed_calls.calls += 1
         return embeddings[text]
 
     def fake_retrieve(store, query, k):
         retrieve_calls.calls += 1
+        received_queries.append(query)
         return [("doc", 0.5)]
 
     def fake_rerank(results, query):
@@ -143,12 +160,22 @@ def test_cached_retrieve_and_rerank_skips_work_on_hit() -> None:
     )
 
     first = cached_fn(object(), "when did the band debut?", 3)
+    assert embed_calls.calls == 1
     assert retrieve_calls.calls == 1
     assert rerank_calls.calls == 1
+    assert received_queries[0] == [1.0, 0.0, 0.0]  # Vector passed directly on miss
 
-    # Paraphrase of the same question -> semantic hit, no new work.
+    # Exact repeat of the same question -> exact hit, ZERO embedding calls!
+    repeat = cached_fn(object(), "when did the band debut?", 3)
+    assert repeat == first
+    assert embed_calls.calls == 1  # Not incremented!
+    assert retrieve_calls.calls == 1
+    assert cache.stats.hits_exact == 1
+
+    # Paraphrase of the same question -> semantic hit, 1 embed call, no retrieve call.
     second = cached_fn(object(), "what year did the band first debut?", 3)
     assert second == first
+    assert embed_calls.calls == 2
     assert retrieve_calls.calls == 1
     assert rerank_calls.calls == 1
     assert cache.stats.hits_semantic == 1
@@ -156,5 +183,7 @@ def test_cached_retrieve_and_rerank_skips_work_on_hit() -> None:
     # Unrelated question -> real cache miss, does the work again.
     third = cached_fn(object(), "what is Pikachu's typing?", 3)
     assert third == first  # fake_retrieve always returns the same stub
+    assert embed_calls.calls == 3
     assert retrieve_calls.calls == 2
     assert rerank_calls.calls == 2
+    assert received_queries[1] == [0.0, 1.0, 0.0]

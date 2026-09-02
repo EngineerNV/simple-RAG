@@ -135,8 +135,17 @@ class SemanticCache(Generic[ValueT]):
     def __len__(self) -> int:
         return len(self._entries)
 
-    def get(self, query_text: str, embedding: Sequence[float], k: int) -> Optional[ValueT]:
-        """Return a cached value for this (query, k), or ``None`` on a miss."""
+    def get(
+        self,
+        query_text: str,
+        embedding: Optional[Sequence[float]] = None,
+        k: int = 3,
+    ) -> Optional[ValueT]:
+        """Return a cached value for this (query, k), or ``None`` on a miss.
+
+        Checks exact hash first (requiring no embedding math). If embedding is
+        provided, performs cosine similarity scan over cached entries on an exact miss.
+        """
 
         exact_key = _exact_key(query_text, k)
         exact_entry = self._entries.get(exact_key)
@@ -145,6 +154,9 @@ class SemanticCache(Generic[ValueT]):
             self.stats.hits_exact += 1
             logger.debug("Semantic cache HIT (exact) for query=%r k=%d", query_text, k)
             return exact_entry.value
+
+        if embedding is None:
+            return None
 
         best_key: Optional[str] = None
         best_score = 0.0
@@ -197,17 +209,29 @@ def cached_retrieve_and_rerank(
     That's the exact call signature `agent_orchestration_helper.apply_rewrite_and_retrieve`
     already expects, so the returned function is a drop-in replacement for
     ``retrieve_contexts`` — no changes needed anywhere else in the pipeline.
-    On a cache miss, retrieval and (if given) reranking both run normally and
-    the final result is cached under the query actually passed in.
+    On an exact cache hit, no embedding calculation is performed.
+    On a semantic cache miss, the computed embedding vector is reused for vector store
+    retrieval to prevent redundant embedding calculations.
     """
 
     def _retrieve_with_cache(store: object, query: str, k: int) -> ValueT:
-        embedding = embed_fn(query)
-        cached_value = cache.get(query, embedding, k)
+        # 1. Exact match hit? O(1) text hash lookup, zero embedding inference!
+        cached_value = cache.get(query, embedding=None, k=k)
         if cached_value is not None:
             return cached_value
 
-        results = retrieve_fn(store, query, k)
+        # 2. Exact miss: generate query embedding vector for semantic scan
+        embedding = embed_fn(query)
+        cached_value = cache.get(query, embedding=embedding, k=k)
+        if cached_value is not None:
+            return cached_value
+
+        # 3. Semantic cache miss: reuse the pre-computed embedding vector for vector store retrieval
+        try:
+            results = retrieve_fn(store, embedding, k)
+        except (TypeError, ValueError, AttributeError):
+            results = retrieve_fn(store, query, k)
+
         if rerank_fn is not None:
             try:
                 results = rerank_fn(results, query)

@@ -63,15 +63,11 @@ def resolve_provider_and_key(explicit_key: str | None, provider_hint: str | None
         detected = auto_detect_provider()
         return (detected[0] if detected else "openai", explicit_key)
 
-    # If explicit provider hint provided, check that provider's environment variable first
+    # If explicit provider hint provided, check that provider's environment variable
     if provider_hint:
         env_var = PROVIDER_ENV_KEYS.get(provider_hint.lower())
         if env_var and os.environ.get(env_var):
             return (provider_hint, os.environ[env_var])
-        # Fall back to any auto-detected key
-        detected = auto_detect_provider()
-        if detected:
-            return (provider_hint, detected[1])
         return (provider_hint, None)
 
     # Auto-detect from environment

@@ -39,6 +39,25 @@ def test_retrieve_contexts_coerces_scores() -> None:
     assert isinstance(results[1][1], float)
 
 
+def test_retrieve_contexts_handles_vector_query() -> None:
+    class StubVectorStore:
+        def __init__(self) -> None:
+            self.vectors = []
+
+        def similarity_search_by_vector_with_relevance_scores(self, embedding, k: int):
+            self.vectors.append(embedding)
+            return [(Document(page_content="vector doc"), 1.6)]
+
+        def _select_relevance_score_fn(self):
+            return lambda d: 1.0 - d / 2.0
+
+    store = StubVectorStore()
+    results = query_module.retrieve_contexts(store, [0.5, 0.5], 1)
+    assert store.vectors == [[0.5, 0.5]]
+    assert results[0][0].page_content == "vector doc"
+    assert results[0][1] == pytest.approx(0.2)  # 1.0 - 1.6 / 2.0 = 0.2
+
+
 def test_compose_messages_returns_chat_objects() -> None:
     doc = Document(page_content="content", metadata={})
     messages = query_module.compose_messages("Question?", [(doc, 0.5)])

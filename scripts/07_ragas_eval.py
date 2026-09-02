@@ -224,6 +224,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         retrieval_k=args.retrieval_k,
+        enable_semantic_cache=False,  # Independent, uncached retrieval per golden question
     )
     try:
         engine = ChatEngine(config)

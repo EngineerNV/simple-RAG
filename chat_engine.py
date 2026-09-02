@@ -10,10 +10,22 @@ each maintaining its own copy. Nothing here imports ``rich`` or ``textual``.
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence, Tuple
+
+# Suppress noisy deprecation and environment warnings before third-party imports
+try:
+    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
+    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
+except Exception:
+    pass
+
+warnings.filterwarnings("ignore", message=r".*langchain-community.*")
+warnings.filterwarnings("ignore", message=r".*ConversationSummaryBufferMemory.*")
+warnings.filterwarnings("ignore", message=r".*fallback GPT-2 tokenizer.*")
 
 try:
     from langchain.memory import ConversationSummaryBufferMemory
