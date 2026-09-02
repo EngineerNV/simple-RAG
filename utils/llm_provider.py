@@ -36,6 +36,14 @@ def auto_detect_provider() -> tuple[str, str] | None:
     return None
 
 
+PROVIDER_ENV_KEYS: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GOOGLE_API_KEY",
+    "claude": "ANTHROPIC_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+
 def resolve_provider_and_key(explicit_key: str | None, provider_hint: str | None) -> tuple[str, str | None]:
     """Resolve the provider and API key from explicit args or environment.
 
@@ -50,24 +58,25 @@ def resolve_provider_and_key(explicit_key: str | None, provider_hint: str | None
     if explicit_key and provider_hint:
         return (provider_hint, explicit_key)
 
-    # If only explicit key, need to detect provider
+    # If only explicit key provided, determine provider
     if explicit_key:
-        if provider_hint:
-            return (provider_hint, explicit_key)
-        # Try to auto-detect from env vars as fallback
         detected = auto_detect_provider()
-        return (detected[0], explicit_key) if detected else ("openai", explicit_key)
+        return (detected[0] if detected else "openai", explicit_key)
+
+    # If explicit provider hint provided, check that provider's environment variable
+    if provider_hint:
+        env_var = PROVIDER_ENV_KEYS.get(provider_hint.lower())
+        if env_var and os.environ.get(env_var):
+            return (provider_hint, os.environ[env_var])
+        return (provider_hint, None)
 
     # Auto-detect from environment
     detected = auto_detect_provider()
     if detected:
-        # If provider_hint given, respect it but use auto-detected key
-        if provider_hint:
-            return (provider_hint, detected[1])
         return detected
 
     # No key found anywhere
-    return (provider_hint or "openai", None)
+    return ("openai", None)
 
 
 def is_openai_reasoning_model(model_name: str) -> bool:

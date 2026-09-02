@@ -34,6 +34,10 @@ import warnings
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 # Suppress noisy deprecation warnings without changing packages.
@@ -645,8 +649,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
 
     provider, api_key = query_module.resolve_provider_and_key(args.api_key, args.provider)
-    
-    if not api_key:
+
+    if args.agent_mode == "llm" and not api_key:
         print("[ERROR] No API key found. Set OPENAI_API_KEY, GOOGLE_API_KEY, or ANTHROPIC_API_KEY environment variable.", file=sys.stderr)
         sys.exit(1)
 

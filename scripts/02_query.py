@@ -127,8 +127,17 @@ def format_metadata(metadata: dict | None) -> str:
     return "metadata: " + ", ".join(parts)
 
 
-def retrieve_contexts(store: Chroma, question: str, k: int) -> RetrieverResult:
-    results = store.similarity_search_with_relevance_scores(question, k=k)
+def retrieve_contexts(store: Chroma, question: str | Sequence[float], k: int) -> RetrieverResult:
+    if not isinstance(question, str) and hasattr(store, "similarity_search_by_vector_with_relevance_scores"):
+        raw_results = store.similarity_search_by_vector_with_relevance_scores(list(question), k=k)
+        relevance_fn_getter = getattr(store, "_select_relevance_score_fn", None)
+        relevance_fn = relevance_fn_getter() if callable(relevance_fn_getter) else None
+        results = [
+            (doc, relevance_fn(score) if relevance_fn is not None else score)
+            for doc, score in raw_results
+        ]
+    else:
+        results = store.similarity_search_with_relevance_scores(question, k=k)
     formatted: RetrieverResult = []
     for doc, score in results:
         try:

@@ -221,3 +221,23 @@ def test_chat_engine_no_rag_turn(monkeypatch: pytest.MonkeyPatch) -> None:
 
     engine.reset()
     assert len(engine.transcript_log.turns) == 0
+
+
+def test_chat_engine_reset_preserves_semantic_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyEmbedder:
+        def embed_query(self, text: str):
+            return [1.0, 0.0]
+
+    monkeypatch.setattr("chat_engine.create_retrieval_store", lambda **kw: (DummyEmbedder(), object()))
+    monkeypatch.setattr("chat_engine.resolve_provider_and_key", lambda k, p: ("openai", "sk-mock"))
+    monkeypatch.setattr("chat_engine.load_chat_model", lambda **kw: MockLLM())
+
+    config = ChatEngineConfig(persist_dir=Path("data/chroma"), enable_semantic_cache=True)
+    engine = ChatEngine(config)
+
+    assert engine.semantic_cache is not None
+    engine.semantic_cache.put("cached query", [1.0, 0.0], k=3, value="cached answer")
+    assert len(engine.semantic_cache) == 1
+
+    engine.reset()
+    assert len(engine.semantic_cache) == 1  # Cache preserved across user reset for economy

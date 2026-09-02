@@ -9,21 +9,30 @@ to the retrieval step.
 
 from __future__ import annotations
 
-import shutil  # Clean up old persistence directories when rebuilding the index
+import json
+import shutil
 import sys
-from pathlib import Path  # Resolve the directory where the Chroma DB should live
-from typing import Iterable, List  # Provide typing for the document list flowing through the script
 import warnings
+from pathlib import Path
+from typing import Iterable, List
 
-# Prefer the newer langchain_huggingface package if available to avoid
-# LangChain deprecation warnings; fall back to the older import for
-# compatibility in environments where the new package isn't installed.
+# Suppress noisy deprecation and environment warnings before third-party imports
+try:
+    from langchain_core._api.deprecation import LangChainDeprecationWarning  # type: ignore
+    warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
+except Exception:
+    pass
+
+warnings.filterwarnings("ignore", message=r".*langchain-community.*")
+warnings.filterwarnings("ignore", message=r".*HuggingFaceEmbeddings.*was deprecated.*")
+warnings.filterwarnings("ignore", message=r".*manual persistence method is no longer supported.*")
+warnings.filterwarnings("ignore", message=r".*fallback GPT-2 tokenizer.*")
+
 from langchain_community.vectorstores import (  # Persist embeddings in a local Chroma collection
     Chroma,
 )
 from langchain_core.documents import Document  # Describe the structure of LangChain documents
 from langchain_core.embeddings import Embeddings  # Type hint for embedding models to keep signatures clear
-import json
 
 try:  # Reuse the ingestion baseline supplied in 00_ingest
     from scripts import ingest as run_ingest

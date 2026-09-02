@@ -44,6 +44,7 @@ New to RAG? Read this section once; everything else in the README assumes these 
 | **Topic gate** | A classifier that runs before anything else and decides whether a question is even in-scope for this agent, so it can politely decline unrelated questions instead of guessing. |
 | **RAG decider** | A second classifier that decides, for an *on-topic* question, whether retrieval is actually needed (a greeting doesn't need a document search; a factual question probably does). |
 | **Query rewriting** | Chat questions are often conversational ("what about its evolution?") and retrieve poorly as-is. The rewriter turns them into a cleaner, self-contained search query before hitting the vector store. |
+| **Semantic cache** | A small LRU cache sitting right after query rewriting. If the current (rewritten) question is an exact repeat, or close enough in *meaning* to a recently-seen one (measured by embedding cosine similarity, not text overlap), retrieval and reranking are skipped entirely and the cached result is reused. See [Semantic result caching](#semantic-result-caching). |
 | **Golden set** | A hand-curated list of questions where a human has already written the *correct* answer and pointed at the *exact* supporting passage. Used to measure pipeline quality objectively instead of eyeballing it. See `data/eval/golden_qa.json`. |
 | **Judge model** | In automated evaluation, a second LLM (ideally a different one than the pipeline being tested) reads the question, the pipeline's answer, and the golden answer, and scores the pipeline. "Judging your own homework" with the same model is avoided on purpose. |
 | **Faithfulness / Answer Relevancy / Context Precision / Context Recall** | The four RAGAS scores this project reports — defined in full in [§5](#evaluation-two-ways). |
@@ -305,10 +306,13 @@ User Input
 [Query Rewriter] -> rewritten, self-contained search query
    |
    v
+[Semantic Cache] -- hit (exact or near-duplicate query) --> [Compose Prompt + LLM]
+   |
+   v miss
 [Retriever (Chroma + embeddings)]
    |
    v
-[Reranker (cross-encoder, or lexical blend fallback)]
+[Reranker (cross-encoder, or lexical blend fallback)] -- result cached for next time
    |
    v
 [Compose Prompt + LLM]
@@ -323,6 +327,7 @@ User Input
   These two fail-safes are deliberately asymmetric — both defaults favor *answering* over refusing or injecting noise. That's a design choice, not an oversight; don't "fix" one to match the other without re-reading why.
 
 - **Query rewriter** (`agent_orchestration_helper.py`) — turns a conversational follow-up ("what about its evolution?") into a cleaner, standalone search query before hitting the vector store.
+- **Semantic cache** (`utils/semantic_cache.py`) — see [Semantic result caching](#semantic-result-caching) below.
 - **Retriever + reranker** — as described in [§3.3–3.4](#3-retrieval-02_querypy) above.
 - **Persona** (`utils/persona.py`) and **off-topic refusals** (`utils/rejections.py`) — both draw their wording from `rag_content.json` (see [§8](#customizing-the-agents-scope-rag_contentjson)), so changing your topic scope automatically updates how the agent introduces itself and how it declines out-of-scope questions.
 
@@ -330,6 +335,24 @@ User Input
 python scripts/05_chat_cli.py --show-context --debug
 python scripts/06_chat_tui.py --save-transcript out.md
 ```
+
+### Semantic result caching
+
+Retrieval isn't free: embedding the query, searching Chroma's HNSW index, fetching the matching chunk text, and cross-encoder reranking all run on **every** RAG turn — even if the same (or a near-duplicate) question was already asked. `utils/semantic_cache.py` adds a small LRU cache, wired in at `chat_engine.py`'s `ChatEngine.__init__`/`process_turn`, that sits right after query rewriting and short-circuits that whole path on a hit.
+
+**Two-tier lookup**, checked in order:
+1. **Exact hash** — the normalized (rewritten) query text hashed with SHA-256. O(1), zero false-positive risk. Catches literal repeats (re-asking the same question, or an eval run hitting the same golden-set question twice).
+2. **Semantic (cosine similarity)** — if there's no exact hash hit, the query's embedding is compared against every currently-cached entry's embedding. A paraphrase like "what year did the band first debut?" vs. "when did the band debut?" embeds to nearly the same vector even though it hashes differently, so this still catches it above a configurable similarity threshold (`--semantic-cache-threshold`, default `0.93`).
+
+**Why the cache key is the *rewritten* query, not the raw message you typed:** the rewriter (previous pipeline stage) already resolves conversational context — anaphora, follow-ups like "what about its evolution?" — into a self-contained search string. Caching at that point is safe: two different conversations that happen to rewrite down to the same search intent *should* share a cache entry. Caching the raw message instead would be a correctness bug, since identical raw phrasing can mean completely different things depending on what was said earlier in the conversation.
+
+**Why this cache is a brute-force scan, not an HNSW/IVF index — unlike the main vector store:** it's capped at `--semantic-cache-size` entries (default **20**). A linear cosine-similarity scan over twenty vectors is both faster and far simpler than building and maintaining a second ANN index for the same job. ANN structures (like the HNSW index Chroma already builds for the ~120-chunk corpus) start earning their keep at thousands-to-millions of vectors; a 20-slot cache never gets close. Worth sitting with that contrast: same underlying operation (nearest-neighbor search over embeddings), two very different index designs, because the two collections are wildly different sizes.
+
+The cache is in-memory and lives only as long as the running `ChatEngine` — the simplest thing that works at this project's scale. Swapping in something persistent (`diskcache`, Redis) later would only mean changing what backs `SemanticCache`'s storage; the `get`/`put` interface it exposes wouldn't need to change.
+
+**What's cached, and what isn't:** the *retrieved-and-reranked context chunks*, not the final LLM answer. The LLM still generates a fresh answer from those chunks every turn — only the (comparatively expensive, fully local) retrieval and reranking steps are skipped on a hit. That's a deliberate, more conservative choice than caching full answers: a bad cache hit here just means slightly stale-but-still-relevant context, not a wrong answer served verbatim for a different question.
+
+Flags (see [CLI reference](#cli-reference) for the full tables): `--semantic-cache-size` (default `20`), `--semantic-cache-threshold` (default `0.93`), `--no-semantic-cache` (disable it entirely — useful when comparing timings, or debugging retrieval issues you don't want masked by a cache hit). Run with `--debug` to see `HIT (exact)` / `HIT (semantic, score=...)` / `MISS` logged for every RAG turn.
 
 Both understand `/reset` (clear conversation memory), `/exit` or `/quit`, and `05_chat_cli.py` additionally understands `/help` and `/showctx`. `06_chat_tui.py` uses `ctrl+r` / `ctrl+s` / `ctrl+c` as keyboard shortcuts instead, since its input box is dedicated to chat text.
 
@@ -473,7 +496,7 @@ python scripts/03_eval.py --in data/eval/sample.json --out reports/sample_eval.j
 python scripts/03_quiz.py --questions data/questions/dev.json --agent-mode pretend --k 3 --out data/human_review.jsonl --resume
 ```
 
-> ⚠️ `03_quiz.py` requires an API key in the environment even in `none`/`pretend` mode — it resolves a provider/key unconditionally at startup and exits if none is found. See [Troubleshooting](#troubleshooting--faq).
+> 💡 `03_quiz.py` and `03_eval.py` run in `none`/`pretend` modes without requiring any API keys. An API key is only required when running in live `--agent-mode llm`.
 
 </details>
 
@@ -514,6 +537,9 @@ python scripts/04_llm_api.py --question "How does retrieval work?" --context "Th
 | `--show-context` | off | Display retrieved snippets alongside each answer |
 | `--save-transcript` | `None` | File path to write a Markdown transcript on exit |
 | `--debug` | off | Verbose debug logging to stderr |
+| `--semantic-cache-size` | `20` | Max entries in the semantic result cache (LRU) — see [Semantic result caching](#semantic-result-caching) |
+| `--semantic-cache-threshold` | `0.93` | Cosine similarity required for a semantic (non-exact) cache hit |
+| `--no-semantic-cache` | off | Disable the semantic result cache entirely |
 
 ```bash
 python scripts/05_chat_cli.py --show-context --debug
@@ -531,6 +557,7 @@ Same pipeline as `05_chat_cli.py`, rendered as a full-screen Textual app instead
 | `--retrieval-k` / `--embedding-model` / `--persist-dir` / `--llm-model` / `--provider` / `--api-key` / `--base-url` / `--temperature` / `--max-tokens` / `--system-prompt` | — | Same as `05_chat_cli.py` |
 | `--save-transcript` | `None` | File path to write a Markdown transcript on exit |
 | `--debug` | off | Verbose logging written to `chat_tui.log` (not the TUI itself, since stdout is occupied by the UI) |
+| `--semantic-cache-size` / `--semantic-cache-threshold` / `--no-semantic-cache` | `20` / `0.93` / off | Same as `05_chat_cli.py` — see [Semantic result caching](#semantic-result-caching) |
 
 Keybindings: `ctrl+r` reset chat · `ctrl+s` save transcript · `ctrl+c` quit. Typing `/exit`, `/quit`, or `/reset` also works.
 
@@ -776,6 +803,7 @@ This produces **one chunk covering both species**, tagged only `{"###": "Poison 
 | `scripts/delete_chroma.py` | Reset `data/chunks/` / `data/chroma/` |
 | `chat_engine.py` | **Shared, UI-agnostic pipeline core** (`ChatEngine`, `ChatEngineConfig`, `TurnResult`) — implement pipeline changes here once; `05_chat_cli.py`, `06_chat_tui.py`, and `07_ragas_eval.py` all build on this instead of duplicating logic |
 | `agent_orchestration_helper.py` | Loads `rag_content.json`; builds the structured RAG decider/query rewriter; assembles the final user prompt payload with persona |
+| `utils/semantic_cache.py` | LRU cache (exact-hash + cosine-similarity) that skips retrieval/reranking for near-duplicate queries — see [Semantic result caching](#semantic-result-caching) |
 | `utils/llm_provider.py` | Provider auto-detection and chat-client construction |
 | `utils/topic_gate.py` | On-topic classifier (fails open) |
 | `utils/persona.py` | Persona preamble builder |
@@ -864,8 +892,8 @@ You installed `requirements-min.txt`, which deliberately omits `sentence-transfo
 **Using an OpenAI reasoning-family model (`gpt-5*`, `o1`, `o3`, `o4`) — as the pipeline model, judge model, or both.**
 These models reject the classic `max_tokens`/non-default-`temperature` chat-completions parameters that the pinned `langchain-openai==0.1.25` always sends, and the legacy conversation-memory class can't count their tokens either. All three are already worked around: `utils/llm_provider.py::is_openai_reasoning_model()` detects these models and routes around the first two constraints, and `07_ragas_eval.py` additionally wraps the judge model with RAGAS's own `LangchainLLMWrapper(..., bypass_temperature=True)` so RAGAS's per-metric temperature overrides don't hit the same wall. Nothing to configure — this is automatic — but if you see a `400 BadRequestError` mentioning `max_tokens` or `temperature` from OpenAI, or a `NotImplementedError` from `get_num_tokens_from_messages`, you've likely hit a model name these detectors don't yet recognize (e.g. a future model family) — check `is_openai_reasoning_model()`'s prefix list.
 
-**`03_quiz.py` exits immediately even in `--agent-mode pretend`, saying no API key was found.**
-This is a real quirk, not a documentation gap — `03_quiz.py` resolves a provider/key at startup unconditionally, even in modes that don't call an LLM. Set any one of `OPENAI_API_KEY` / `GOOGLE_API_KEY` / `ANTHROPIC_API_KEY` before running it, regardless of `--agent-mode`.
+**Do `03_quiz.py` or `03_eval.py` require an API key?**
+Only if you choose `--agent-mode llm`. When running with `--agent-mode none` or `--agent-mode pretend`, answers are generated locally from retrieved context or formatted with mock citations without making any network calls or requiring an API key.
 
 - What is the input for RAGAS? The golden set at `data/eval/golden_qa.json`.
 - What does it evaluate? Faithfulness, Answer Relevancy, Context Precision, Context Recall — see [§5](#evaluation-two-ways).

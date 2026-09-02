@@ -485,6 +485,63 @@
 * **Research Note**: Like Kadabra, Haunter requires a trade to complete its evolution into Gengar—another Gen I anomaly Agatha's research treats as evidence that some transformations need an outside witness.  
 * **Lore**: Gengar's shadow is reported to move independently of ambient light sources; Agatha's decades of study into fear conditioning draw heavily on documented Gastly-line behavior.
 
+### Adaptable & Synthetic Lineages
+
+#### Eevee → Vaporeon / Jolteon / Flareon
+
+* **Typing**: Normal (→ Water / Electric / Fire)  
+* **Habitat**: Celadon Mansion, urban residences, and Silph Co. research facilities.  
+* **Base Stats** (Vaporeon): HP 130 / Atk 65 / Def 60 / Sp.Atk 110 / Sp.Def 95 / Speed 65  
+* **Base Stats** (Jolteon): HP 65 / Atk 65 / Def 60 / Sp.Atk 110 / Sp.Def 95 / Speed 130  
+* **Base Stats** (Flareon): HP 65 / Atk 130 / Def 60 / Sp.Atk 95 / Sp.Def 110 / Speed 65  
+* **Moves**: Water Gun, Hydro Pump (Vaporeon); Thundershock, Pin Missile (Jolteon); Ember, Fire Blast (Flareon).  
+* **Research Note**: Eevee's unstable genetic structure is uniquely sensitive to elemental stone radiation (*"The Battling Eevee Brothers"* case study). Vaporeon's cellular structure melts into water; Jolteon concentrates negative ions; Flareon stores superheated gas in an internal flame pouch.  
+* **Lore**: The Eevee evolutionary branch is central to Celadon City's bio-genetic research, serving as a primary model for environmental adaptation studies.
+
+#### Psyduck → Golduck
+
+* **Typing**: Water (with latent Psychic talent)  
+* **Habitat**: Cerulean City canals, Route 24 ponds, and misty lake edges.  
+* **Base Stats** (Golduck): HP 80 / Atk 82 / Def 78 / Sp.Atk 95 / Sp.Def 80 / Speed 85  
+* **Moves**: Scratch, Tail Whip, Water Gun, Confusion, Disable.  
+* **Field Role**: Misty's unpredictable wildcard; exhibits involuntary psychic eruptions when severe headache stress peaks.  
+* **Lore**: Psyduck's chronic headache is caused by intense brainwave activity bypassing conscious control; Cerulean Gym research treats Psyduck's erratic telekinesis as a case study in involuntary psychic surge mechanics.
+
+#### Cubone → Marowak
+
+* **Typing**: Ground  
+* **Habitat**: Pokémon Tower grounds in Lavender Town and rocky hillsides near Rock Tunnel.  
+* **Base Stats** (Marowak): HP 60 / Atk 80 / Def 110 / Sp.Atk 50 / Sp.Def 80 / Speed 45  
+* **Moves**: Bone Club, Headbutt, Bonemerang, Thrash.  
+* **Field Role**: Defensive Ground physical striker; uses thick bone armor for leverage and projectile ricochets.  
+* **Lore**: Cubone wears the skull of its deceased mother; Lavender Town folklore is deeply tied to the solemn spirit connection between Cubone and departed Marowak guardians at Pokémon Tower.
+
+#### Pinsir
+
+* **Typing**: Bug  
+* **Habitat**: Safari Zone tall grass and dense forest thickets.  
+* **Base Stats**: HP 65 / Atk 125 / Def 100 / Sp.Atk 55 / Sp.Def 70 / Speed 85  
+* **Moves**: Vice Grip, Seismic Toss, Guillotine, Harden.  
+* **Field Role**: Physical Bug powerhouse; Safari Zone counterpart to Scyther.  
+* **Lore**: Pinsir's horns can snap thick saplings; intense territorial feuds between wild Pinsir and Scyther populations are monitored by Fuchsia Zone rangers.
+
+#### Porygon
+
+* **Typing**: Normal (Digital Code)  
+* **Habitat**: Silph Co. Saffron Laboratories and Celadon Game Corner prize vaults.  
+* **Base Stats**: HP 65 / Atk 60 / Def 70 / Sp.Atk 85 / Sp.Def 75 / Speed 40  
+* **Moves**: Conversion, Psybeam, Recover, Tri Attack.  
+* **Field Role**: Synthetic utility; converts its body code data to match target defensive typings.  
+* **Lore**: Porygon is the first completely man-made Pokémon generated entirely from computer code by Silph Co. engineers, designed for unassisted space and digital exploration.
+
+#### Farfetch'd
+
+* **Typing**: Normal/Flying  
+* **Habitat**: Rare sightings along Route 12 and Vermilion outskirts.  
+* **Base Stats**: HP 52 / Atk 65 / Def 55 / Sp.Atk 58 / Sp.Def 62 / Speed 60  
+* **Moves**: Peck, Sand Attack, Slash, Swords Dance.  
+* **Lore**: Farfetch'd carries a specific stalk of green onion/leek used as a weapon lever and nest material; conservation programs guard the species from over-harvesting due to historical rarity.
+
 ---
 
 ## 5. Moves & Tactics
@@ -581,5 +638,20 @@
 
 * Ash vs Gary rivalry frames tactical growth vs raw capture power.  
 * **Lore/Analysis**: Rivalries function as developmental accelerants—focused competition yields rapid innovation in team composition and training regimens.
+
+### Ash's Haunter vs. Sabrina's Kadabra
+
+* Demonstrates breaking an invincible Psychic Gym Leader's emotional rigidity not through brute force, but through unexpected humor and emotional liberation.  
+* **Lore/Analysis**: Sabrina's suppressed personality was re-integrated when Haunter's playful antics induced laughter, demonstrating that battle resolution can occur outside formal KO parameters.
+
+### Bye Bye Butterfree (Migration & Release)
+
+* Documents the natural seasonal oceanic mating migration of Kanto Butterfree across the archipelago.  
+* **Lore/Analysis**: Ash's release of his first captured Pokémon highlights the ethical responsibility of trainers to prioritize species lifecycle needs over personal ownership.
+
+### The Squirtle Squad (Civil Service & Firefighting)
+
+* An abandoned Squirtle gang transformed from rogue pranksters into Fuchsia/Vermilion's official civil firefighting unit.  
+* **Lore/Analysis**: Illustrates how urban wild Pokémon rehabilitations succeed when surplus energy and team coordination are redirected into community safety.
 
 ---
